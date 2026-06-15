@@ -8,7 +8,7 @@
 // never leave the machine. The AWS SDK is vendored locally as a single bundled
 // module (vendor/aws-sdk.js) so the page has no runtime CDN dependency.
 import { S3Client, Upload } from "./vendor/aws-sdk.js";
-import { MSG } from "./protocol.js?v=20260615-1";
+import { MSG, FILTER_DEFAULTS, DEACON_VERSION } from "./protocol.js?v=20260615-1";
 
 // --- Fixed configuration -----------------------------------------------------
 // CLIMB uses Ceph RADOS Gateway (S3-compatible), not real AWS, so:
@@ -48,8 +48,6 @@ const resetBtn = $("reset-btn");
 const progressWrap = $("progress-wrap");
 const dehostProgress = $("dehost-progress");
 const dehostLabel = $("dehost-label");
-const uploadProgress = $("upload-progress");
-const uploadLabel = $("upload-label");
 const fileListEl = $("file-list");
 const statusEl = $("status");
 
@@ -58,6 +56,9 @@ let selectedFiles = []; // { file, key } entries, sequence files only
 let totalBytes = 0;
 let isUploading = false;
 let indexLoaded = false;
+let indexFilename = ""; // name of the loaded .idx (recorded in summaries)
+let indexK = null; // k-mer length parsed from the index info string
+let indexW = null; // window size parsed from the index info string
 
 // --- Helpers -----------------------------------------------------------------
 function setStatus(msg, kind) {
@@ -73,6 +74,17 @@ function humanBytes(n) {
     i++;
   }
   return `${n.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+// Base counts use decimal SI units (1 Mbp = 1,000,000 bases).
+function humanBases(bp) {
+  const units = ["bp", "kbp", "Mbp", "Gbp", "Tbp"];
+  let i = 0;
+  while (bp >= 1000 && i < units.length - 1) {
+    bp /= 1000;
+    i++;
+  }
+  return `${bp.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 function timestampPrefix() {
@@ -143,13 +155,19 @@ worker.onmessage = (e) => {
     case MSG.READY:
       setStatus("Load a Deacon index to begin.");
       break;
-    case MSG.INDEX_LOADED:
+    case MSG.INDEX_LOADED: {
       indexLoaded = true;
       indexZone.classList.add("loaded");
       indexInfo.textContent = m.info;
-      setStatus("Index loaded. Select a folder of sequences and your CLIMB keys.");
+      // info looks like "k=31, w=61 (12,345 minimizers)" — pull out k and w for
+      // the per-file JSON summaries.
+      const kw = /k=(\d+),\s*w=(\d+)/.exec(m.info || "");
+      indexK = kw ? Number(kw[1]) : null;
+      indexW = kw ? Number(kw[2]) : null;
+      setStatus("Index loaded. Select sequences and enter CLIMB credentials.");
       updateUploadEnabled();
       break;
+    }
     case MSG.PROGRESS:
       if (onDehostProgress) onDehostProgress(m);
       break;
@@ -194,7 +212,7 @@ function dehostStream(file, hooks) {
           if (m.done) {
             onWorkerError = null;
             onDehostProgress = null;
-            if (hooks.onStats) hooks.onStats(m.stats);
+            if (hooks.onStats) hooks.onStats(m.stats, m.elapsed);
             controller.close();
           }
           resolve();
@@ -240,6 +258,7 @@ async function loadIndexFile(file) {
     return;
   }
   indexLoaded = false;
+  indexFilename = file.name;
   indexZone.classList.remove("loaded");
   updateUploadEnabled();
   indexName.textContent = file.name;
@@ -349,6 +368,17 @@ async function uploadAll() {
   );
   if (!items.length) return;
 
+  console.log(`updeacon: bucket "${BUCKET}" at ${ENDPOINT}`);
+  console.log("updeacon: deacon filter params", {
+    index: indexFilename,
+    k: indexK,
+    w: indexW,
+    deplete: FILTER_DEFAULTS.deplete,
+    abs_threshold: FILTER_DEFAULTS.absThreshold,
+    rel_threshold: FILTER_DEFAULTS.relThreshold,
+    prefix_length: FILTER_DEFAULTS.prefixLength,
+  });
+
   isUploading = true;
   updateUploadEnabled();
   resetBtn.disabled = true;
@@ -358,9 +388,7 @@ async function uploadAll() {
   progressWrap.style.display = "block";
   fileListEl.innerHTML = "";
   dehostProgress.value = 0;
-  uploadProgress.value = 0;
   dehostLabel.textContent = "";
-  uploadLabel.textContent = "";
   const rows = items.map(({ file }) => {
     const li = document.createElement("li");
     const name = document.createElement("span");
@@ -381,11 +409,10 @@ async function uploadAll() {
     credentials: { accessKeyId, secretAccessKey },
   });
 
-  // Aggregate progress. Dehost progress is an exact % of input bytes (we know the
-  // source sizes); upload progress is bytes-only (the filtered size is unknown
-  // until a file finishes, so the bar is indeterminate during transfer).
+  // Overall progress is an exact % of input bytes dehosted (we know the source
+  // sizes). Per-file rows additionally show bytes uploaded.
   let dehostedBefore = 0; // input bytes of fully-dehosted files
-  let uploadedBefore = 0; // output bytes of fully-uploaded files
+  let totalBasesIn = 0; // input bases dehosted (from per-file stats)
 
   let completed = 0;
   let inFileLoop = false;
@@ -414,6 +441,7 @@ async function uploadAll() {
       let curProcessed = 0; // input bytes dehosted for this file
       let curUploaded = 0; // output bytes uploaded for this file
       let fileStats = null;
+      let fileElapsed = 0;
 
       const renderRow = () => {
         const dpct = file.size ? Math.min(100, (curProcessed / file.size) * 100) : 100;
@@ -428,8 +456,9 @@ async function uploadAll() {
           `(${pct.toFixed(1)}%) — file ${i + 1} of ${items.length}`;
         renderRow();
       };
-      const onStats = (stats) => {
+      const onStats = (stats, elapsed) => {
         fileStats = stats;
+        fileElapsed = Number(elapsed) || 0;
       };
 
       const stream = dehostStream(file, { onProgress, onStats });
@@ -439,36 +468,39 @@ async function uploadAll() {
         queueSize: QUEUE_SIZE,
         partSize: PART_SIZE,
       });
-      uploadProgress.removeAttribute("value"); // indeterminate during transfer
       up.on("httpUploadProgress", (p) => {
         curUploaded = p.loaded || 0;
-        uploadLabel.textContent =
-          `Uploaded ${humanBytes(uploadedBefore + curUploaded)} · file ${i + 1} of ${items.length}`;
         renderRow();
       });
 
       await up.done();
 
+      // Upload a Deacon-style JSON summary alongside the dehosted file.
+      const summary = buildSummary({ file, key, stats: fileStats, elapsed: fileElapsed });
+      await new Upload({
+        client,
+        params: {
+          Bucket: BUCKET,
+          Key: `${key}.deacon.json`,
+          Body: new Blob([JSON.stringify(summary, null, 2)], { type: "application/json" }),
+          ContentType: "application/json",
+        },
+      }).done();
+
       dehostedBefore += file.size;
-      uploadedBefore += curUploaded;
+      totalBasesIn += Number(fileStats?.basesIn || 0);
       rows[i].li.className = "done";
       const readsIn = Number(fileStats?.readsIn || 0);
       const readsOut = Number(fileStats?.readsOut || 0);
       rows[i].st.textContent = readsIn
-        ? `done · ${readsOut.toLocaleString()}/${readsIn.toLocaleString()} reads kept`
+        ? `done · ${readsOut.toLocaleString()}/${readsIn.toLocaleString()} reads uploaded`
         : "done";
       completed++;
     }
 
     dehostProgress.value = 100;
-    uploadProgress.value = 100;
-    dehostLabel.textContent = `Dehosted ${humanBytes(totalBytes)} of input across ${completed} file${completed === 1 ? "" : "s"}.`;
-    uploadLabel.textContent = `Uploaded ${humanBytes(uploadedBefore)} of dehosted output.`;
-    setStatus(
-      `Dehosted and uploaded ${completed} file${completed === 1 ? "" : "s"} to ` +
-        `s3://${BUCKET}/${timestamp}/`,
-      "success"
-    );
+    dehostLabel.textContent = `Dehosted ${humanBases(totalBasesIn)} of input across ${completed} file${completed === 1 ? "" : "s"}.`;
+    setStatus(`Upload complete (${timestamp})`, "success");
   } catch (err) {
     const idx = completed; // the file that failed
     if (inFileLoop && rows[idx]) {
@@ -478,11 +510,56 @@ async function uploadAll() {
     console.error(err);
     setStatus(formatError(err), "error");
   } finally {
-    uploadProgress.value = uploadProgress.value || 0; // restore determinate bar
     isUploading = false;
     resetBtn.disabled = false;
     updateUploadEnabled();
   }
+}
+
+// Build a Deacon-style JSON summary for one dehosted file, mirroring the schema
+// the `deacon` CLI emits. Counts come from the WASM session's stats; thresholds
+// and version come from the shared config. Fields that don't apply to the
+// browser pipeline (paired reads, renaming, separate total timing) are left at
+// their inert defaults.
+function buildSummary({ file, key, stats, elapsed }) {
+  const seqsIn = Number(stats?.readsIn || 0);
+  const seqsOut = Number(stats?.readsOut || 0);
+  const bpIn = Number(stats?.basesIn || 0);
+  const bpOut = Number(stats?.basesOut || 0);
+  const t = Number(elapsed) || 0;
+  const prop = (num, den) => (den > 0 ? num / den : 0);
+  const rate = (n) => (t > 0 ? Math.round(n / t) : 0);
+  return {
+    version: DEACON_VERSION,
+    index: indexFilename,
+    input: file.webkitRelativePath || file.name,
+    input2: null,
+    output: key,
+    output2: null,
+    k: indexK,
+    w: indexW,
+    abs_threshold: FILTER_DEFAULTS.absThreshold,
+    rel_threshold: FILTER_DEFAULTS.relThreshold,
+    prefix_length: FILTER_DEFAULTS.prefixLength,
+    deplete: FILTER_DEFAULTS.deplete,
+    rename: false,
+    rename_random: false,
+    seqs_in: seqsIn,
+    seqs_out: seqsOut,
+    seqs_out_proportion: prop(seqsOut, seqsIn),
+    seqs_removed: seqsIn - seqsOut,
+    seqs_removed_proportion: prop(seqsIn - seqsOut, seqsIn),
+    bp_in: bpIn,
+    bp_out: bpOut,
+    bp_out_proportion: prop(bpOut, bpIn),
+    bp_removed: bpIn - bpOut,
+    bp_removed_proportion: prop(bpIn - bpOut, bpIn),
+    time: t,
+    seqs_per_second: rate(seqsIn),
+    bp_per_second: rate(bpIn),
+    seqs_per_second_total: rate(seqsIn),
+    bp_per_second_total: rate(bpIn),
+  };
 }
 
 function formatError(err) {
