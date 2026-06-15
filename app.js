@@ -1,9 +1,14 @@
-// updeacon — client-side fastq/fasta uploader for the CLIMB S3-compatible store.
+// updeacon — client-side fastq/fasta dehosting + uploader for the CLIMB
+// S3-compatible store.
 //
-// Everything runs in the browser. The AWS SDK is vendored locally as a single
-// bundled module (vendor/aws-sdk.js) so the page has no runtime CDN dependency.
-// Rebuild it with `npm run build:sdk` (see README).
+// Everything runs in the browser. Each selected file is decontaminated with
+// Deacon (compiled to WebAssembly, run in a Web Worker) and the filtered output
+// is streamed *directly* into the S3 multipart upload as it is produced — so
+// dehosting and uploading of a file happen simultaneously and contaminant reads
+// never leave the machine. The AWS SDK is vendored locally as a single bundled
+// module (vendor/aws-sdk.js) so the page has no runtime CDN dependency.
 import { S3Client, Upload } from "./vendor/aws-sdk.js";
+import { MSG } from "./protocol.js?v=20260615-1";
 
 // --- Fixed configuration -----------------------------------------------------
 // CLIMB uses Ceph RADOS Gateway (S3-compatible), not real AWS, so:
@@ -14,26 +19,37 @@ const ENDPOINT = "https://s3.climb.ac.uk";
 const BUCKET = "quick-research-bede-upload-test";
 const REGION = "us-east-1";
 
-// Matches fastq/fasta sequence files, optionally .gz or .zst compressed
-// (fq/fa short forms included).
-const SEQ_RE = /\.(fastq|fq|fasta|fa)(\.gz|\.zst)?$/i;
+const ASSET_VERSION = "20260615-1";
+
+// Matches fastq/fasta sequence files, optionally .gz compressed (fq/fa short
+// forms included).
+const SEQ_RE = /\.(fastq|fq|fasta|fa)(\.gz)?$/i;
 
 // Multipart tuning: 8 MiB parts, up to 4 concurrent parts per file.
 const PART_SIZE = 8 * 1024 * 1024;
 const QUEUE_SIZE = 4;
 
+// Largest index we'll try to load into browser memory.
+const MAX_INDEX_BYTES = 1024 * 1024 * 1024; // 1 GB
+
 // --- DOM ---------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
 const accessKeyEl = $("access-key");
 const secretKeyEl = $("secret-key");
+const indexZone = $("index-zone");
+const indexInput = $("index-input");
+const indexName = $("index-name");
+const indexInfo = $("index-info");
 const dirZone = $("dir-zone");
 const dirInput = $("dir-input");
 const dirSummary = $("dir-summary");
 const uploadBtn = $("upload-btn");
 const resetBtn = $("reset-btn");
 const progressWrap = $("progress-wrap");
-const overallProgress = $("overall-progress");
-const progressLabel = $("progress-label");
+const dehostProgress = $("dehost-progress");
+const dehostLabel = $("dehost-label");
+const uploadProgress = $("upload-progress");
+const uploadLabel = $("upload-label");
 const fileListEl = $("file-list");
 const statusEl = $("status");
 
@@ -41,6 +57,7 @@ const statusEl = $("status");
 let selectedFiles = []; // { file, key } entries, sequence files only
 let totalBytes = 0;
 let isUploading = false;
+let indexLoaded = false;
 
 // --- Helpers -----------------------------------------------------------------
 function setStatus(msg, kind) {
@@ -66,6 +83,7 @@ function timestampPrefix() {
 function updateUploadEnabled() {
   uploadBtn.disabled =
     isUploading ||
+    !indexLoaded ||
     selectedFiles.length === 0 ||
     !accessKeyEl.value.trim() ||
     !secretKeyEl.value.trim();
@@ -108,6 +126,127 @@ function setSelection(files) {
   progressWrap.style.display = "none";
   fileListEl.innerHTML = "";
   updateUploadEnabled();
+}
+
+// --- WASM worker (dehosting) -------------------------------------------------
+const worker = new Worker(`./worker.js?v=${ASSET_VERSION}`, { type: "module" });
+
+// While a file is being filtered these route the worker's streaming replies to
+// the active per-file handlers (one file is processed at a time).
+let onOutputBatch = null; // (msg) => void  — next OUTPUT_CHUNK_BATCH
+let onDehostProgress = null; // (msg) => void  — PROGRESS for the active file
+let onWorkerError = null; // (message) => void — abort the active pull
+
+worker.onmessage = (e) => {
+  const m = e.data;
+  switch (m.type) {
+    case MSG.READY:
+      setStatus("Load a Deacon index to begin.");
+      break;
+    case MSG.INDEX_LOADED:
+      indexLoaded = true;
+      indexZone.classList.add("loaded");
+      indexInfo.textContent = m.info;
+      setStatus("Index loaded. Select a folder of sequences and your CLIMB keys.");
+      updateUploadEnabled();
+      break;
+    case MSG.PROGRESS:
+      if (onDehostProgress) onDehostProgress(m);
+      break;
+    case MSG.OUTPUT_CHUNK_BATCH:
+      if (onOutputBatch) onOutputBatch(m);
+      break;
+    case MSG.ERROR:
+      if (onWorkerError) onWorkerError(m.message);
+      else {
+        indexInfo.textContent = "";
+        setStatus("Error: " + m.message, "error");
+      }
+      break;
+    default:
+      break;
+  }
+};
+
+worker.postMessage({ type: MSG.INIT });
+
+// Returns a ReadableStream of the dehosted bytes of `file`. The stream is
+// pull-driven: each `pull` asks the worker for the next output batch, so the S3
+// upload (which consumes this stream) paces the WASM filter and memory stays
+// bounded. `hooks.onProgress(msg)` fires as input is consumed;
+// `hooks.onStats(stats)` fires once when filtering completes.
+function dehostStream(file, hooks) {
+  return new ReadableStream({
+    start() {
+      onDehostProgress = hooks.onProgress;
+      worker.postMessage({ type: MSG.FILTER, data: { file } });
+    },
+    pull(controller) {
+      return new Promise((resolve, reject) => {
+        onWorkerError = (message) => {
+          onWorkerError = null;
+          onOutputBatch = null;
+          reject(new Error(message));
+        };
+        onOutputBatch = (m) => {
+          onOutputBatch = null;
+          for (const buf of m.chunks) controller.enqueue(new Uint8Array(buf));
+          if (m.done) {
+            onWorkerError = null;
+            onDehostProgress = null;
+            if (hooks.onStats) hooks.onStats(m.stats);
+            controller.close();
+          }
+          resolve();
+        };
+        worker.postMessage({ type: MSG.PULL });
+      });
+    },
+    cancel() {
+      // Drop our handlers; the worker disposes its session on the next FILTER.
+      onOutputBatch = null;
+      onDehostProgress = null;
+      onWorkerError = null;
+    },
+  });
+}
+
+// --- Index selection ---------------------------------------------------------
+indexZone.addEventListener("click", () => {
+  if (!isUploading) indexInput.click();
+});
+indexZone.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  if (!isUploading) indexZone.classList.add("dragover");
+});
+indexZone.addEventListener("dragleave", () => indexZone.classList.remove("dragover"));
+indexZone.addEventListener("drop", (e) => {
+  e.preventDefault();
+  indexZone.classList.remove("dragover");
+  if (isUploading) return;
+  if (e.dataTransfer.files.length > 0) loadIndexFile(e.dataTransfer.files[0]);
+});
+indexInput.addEventListener("change", () => {
+  if (indexInput.files.length > 0) loadIndexFile(indexInput.files[0]);
+});
+
+async function loadIndexFile(file) {
+  if (file.size > MAX_INDEX_BYTES) {
+    setStatus(
+      `Index file too large for browser use (${(file.size / 1024 / 1024).toFixed(0)} MB). ` +
+        `Maximum supported size is ${MAX_INDEX_BYTES / 1024 / 1024 / 1024} GB.`,
+      "error"
+    );
+    return;
+  }
+  indexLoaded = false;
+  indexZone.classList.remove("loaded");
+  updateUploadEnabled();
+  indexName.textContent = file.name;
+  indexInfo.textContent = "Loading…";
+  setStatus(`Loading index (${(file.size / 1024 / 1024).toFixed(0)} MB)…`);
+  const buf = await file.arrayBuffer();
+  worker.postMessage({ type: MSG.LOAD_INDEX, data: buf }, [buf]);
 }
 
 // --- Directory selection -----------------------------------------------------
@@ -218,6 +357,10 @@ async function uploadAll() {
   // Render per-file rows.
   progressWrap.style.display = "block";
   fileListEl.innerHTML = "";
+  dehostProgress.value = 0;
+  uploadProgress.value = 0;
+  dehostLabel.textContent = "";
+  uploadLabel.textContent = "";
   const rows = items.map(({ file }) => {
     const li = document.createElement("li");
     const name = document.createElement("span");
@@ -238,19 +381,11 @@ async function uploadAll() {
     credentials: { accessKeyId, secretAccessKey },
   });
 
-  // Track aggregate progress across all files. `lib-storage` reports the
-  // cumulative `loaded` for the current file, so we keep per-file loaded values
-  // and sum them for the overall bar.
-  const loaded = new Array(items.length).fill(0);
-  const renderOverall = (idx) => {
-    const sum = loaded.reduce((a, b) => a + b, 0);
-    const pct = totalBytes ? (sum / totalBytes) * 100 : 0;
-    overallProgress.value = pct;
-    progressLabel.textContent =
-      `Uploading file ${idx + 1} of ${items.length} · ` +
-      `${humanBytes(sum)} / ${humanBytes(totalBytes)} (${pct.toFixed(1)}%)`;
-  };
-  renderOverall(0);
+  // Aggregate progress. Dehost progress is an exact % of input bytes (we know the
+  // source sizes); upload progress is bytes-only (the filtered size is unknown
+  // until a file finishes, so the bar is indeterminate during transfer).
+  let dehostedBefore = 0; // input bytes of fully-dehosted files
+  let uploadedBefore = 0; // output bytes of fully-uploaded files
 
   let completed = 0;
   let inFileLoop = false;
@@ -270,36 +405,67 @@ async function uploadAll() {
     }).done();
 
     inFileLoop = true;
-    setStatus(`Uploading to ${timestamp}/ …`);
+    setStatus(`Dehosting and uploading to ${timestamp}/ …`);
     for (let i = 0; i < items.length; i++) {
       const { file, key } = items[i];
       rows[i].li.className = "active";
-      rows[i].st.textContent = "uploading…";
+      rows[i].st.textContent = "dehosting…";
 
+      let curProcessed = 0; // input bytes dehosted for this file
+      let curUploaded = 0; // output bytes uploaded for this file
+      let fileStats = null;
+
+      const renderRow = () => {
+        const dpct = file.size ? Math.min(100, (curProcessed / file.size) * 100) : 100;
+        rows[i].st.textContent = `dehost ${dpct.toFixed(0)}% · up ${humanBytes(curUploaded)}`;
+      };
+      const onProgress = (m) => {
+        curProcessed = m.bytesProcessed || 0;
+        const pct = totalBytes ? ((dehostedBefore + curProcessed) / totalBytes) * 100 : 0;
+        dehostProgress.value = pct;
+        dehostLabel.textContent =
+          `Dehosting · ${humanBytes(dehostedBefore + curProcessed)} / ${humanBytes(totalBytes)} ` +
+          `(${pct.toFixed(1)}%) — file ${i + 1} of ${items.length}`;
+        renderRow();
+      };
+      const onStats = (stats) => {
+        fileStats = stats;
+      };
+
+      const stream = dehostStream(file, { onProgress, onStats });
       const up = new Upload({
         client,
-        params: { Bucket: BUCKET, Key: key, Body: file },
+        params: { Bucket: BUCKET, Key: key, Body: stream },
         queueSize: QUEUE_SIZE,
         partSize: PART_SIZE,
       });
+      uploadProgress.removeAttribute("value"); // indeterminate during transfer
       up.on("httpUploadProgress", (p) => {
-        loaded[i] = p.loaded || 0;
-        renderOverall(i);
+        curUploaded = p.loaded || 0;
+        uploadLabel.textContent =
+          `Uploaded ${humanBytes(uploadedBefore + curUploaded)} · file ${i + 1} of ${items.length}`;
+        renderRow();
       });
 
       await up.done();
 
-      loaded[i] = file.size; // ensure the bar reflects full completion
+      dehostedBefore += file.size;
+      uploadedBefore += curUploaded;
       rows[i].li.className = "done";
-      rows[i].st.textContent = "done";
+      const readsIn = Number(fileStats?.readsIn || 0);
+      const readsOut = Number(fileStats?.readsOut || 0);
+      rows[i].st.textContent = readsIn
+        ? `done · ${readsOut.toLocaleString()}/${readsIn.toLocaleString()} reads kept`
+        : "done";
       completed++;
-      renderOverall(Math.min(i + 1, items.length - 1));
     }
 
-    overallProgress.value = 100;
-    progressLabel.textContent = `Done · ${completed}/${items.length} files · ${humanBytes(totalBytes)}`;
+    dehostProgress.value = 100;
+    uploadProgress.value = 100;
+    dehostLabel.textContent = `Dehosted ${humanBytes(totalBytes)} of input across ${completed} file${completed === 1 ? "" : "s"}.`;
+    uploadLabel.textContent = `Uploaded ${humanBytes(uploadedBefore)} of dehosted output.`;
     setStatus(
-      `Uploaded ${completed} file${completed === 1 ? "" : "s"} to ` +
+      `Dehosted and uploaded ${completed} file${completed === 1 ? "" : "s"} to ` +
         `s3://${BUCKET}/${timestamp}/`,
       "success"
     );
@@ -312,6 +478,7 @@ async function uploadAll() {
     console.error(err);
     setStatus(formatError(err), "error");
   } finally {
+    uploadProgress.value = uploadProgress.value || 0; // restore determinate bar
     isUploading = false;
     resetBtn.disabled = false;
     updateUploadEnabled();

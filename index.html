@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>updeacon</title>
+<title>updeacon-climb</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;700&family=Roboto+Flex:opsz@8..144&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&family=Roboto+Flex:opsz@8..144&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Roboto Flex', system-ui, -apple-system, sans-serif; background: #f5f5f5; color: #333; padding: 2rem; max-width: 720px; margin: 0 auto; }
@@ -14,7 +14,7 @@
   .subtitle { color: #666; margin-bottom: 1.5rem; font-size: 0.9rem; }
   .field { margin-bottom: 1rem; }
   .field label { display: block; font-size: 0.85rem; color: #555; margin-bottom: 0.25rem; }
-  .field input { width: 100%; padding: 0.5rem 0.6rem; border: 1px solid #ccc; font-family: 'Inconsolata', monospace; font-size: 0.9rem; }
+  .field input { width: 100%; padding: 0.5rem 0.6rem; border: 1px solid #ccc; font-family: 'Roboto Mono', monospace; font-size: 0.9rem; }
   .field input:focus { outline: none; border-color: #4a90d9; }
   .drop-zone { border: 2px dashed #aaa; padding: 2rem; text-align: center; cursor: pointer; transition: all 0.2s; background: #fff; margin-bottom: 1rem; }
   .drop-zone:hover, .drop-zone.dragover { border-color: #4a90d9; background: #f0f7ff; }
@@ -23,6 +23,10 @@
   .drop-zone .label { font-size: 0.95rem; color: #555; }
   .drop-zone .summary { font-weight: 600; color: #333; margin-top: 0.5rem; }
   .drop-zone .summary:empty { display: none; }
+  .drop-zone .filename { font-weight: 600; color: #333; margin-top: 0.5rem; }
+  .drop-zone .filename:empty { display: none; }
+  .drop-zone .idx-info { font-size: 0.8rem; color: #888; margin-top: 0.3rem; }
+  .drop-zone .idx-info:empty { display: none; }
   .actions { display: flex; gap: 0.6rem; align-items: center; margin-bottom: 0.4rem; }
   button { background: #4a90d9; color: #fff; border: none; padding: 0.6rem 1.5rem; cursor: pointer; font-size: 0.95rem; transition: background 0.2s; }
   button:hover:not(:disabled) { background: #3a7bc8; }
@@ -34,7 +38,7 @@
   progress[value]::-webkit-progress-bar { background: #eee; }
   progress[value]::-webkit-progress-value { background: #4a90d9; }
   .progress-label { font-size: 0.85rem; color: #555; margin-top: 0.3rem; }
-  #file-list { list-style: none; margin-top: 0.6rem; font-family: 'Inconsolata', monospace; font-size: 0.8rem; max-height: 14rem; overflow-y: auto; border: 1px solid #ddd; background: #fff; }
+  #file-list { list-style: none; margin-top: 0.6rem; font-family: 'Roboto Mono', monospace; font-size: 0.8rem; max-height: 14rem; overflow-y: auto; border: 1px solid #ddd; background: #fff; }
   #file-list li { display: flex; justify-content: space-between; gap: 1rem; padding: 0.25rem 0.6rem; border-bottom: 1px solid #f0f0f0; }
   #file-list li:last-child { border-bottom: none; }
   #file-list .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -51,10 +55,11 @@
 </style>
 </head>
 <body>
-<h1>updeacon</h1>
-<p class="subtitle">Upload a directory of fasta/fastq files to CLIMB S3.
-  Use the access key ID and secret access key found in the 'S3 Buckets' section of your Bryn portal.
-  Your S3 secret access key is neither stored nor transmitted.</p>
+<h1>updeacon-s3</h1>
+<p class="subtitle">Locally dehost and upload fasta/fastq file(s) to CLIMB S3 object storage.
+  Runs <a href="https://github.com/bede/deacon">Deacon</a> using WebAssembly to remove human reads prior to upload.
+  Use the <em>access key ID</em> and <em>secret access key</em> shown in the 'S3 Buckets' area of the CLIMB portal. Use with the <a href="https://objectstorage.uk-london-1.oraclecloud.com/n/lrbvkel2wjot/b/human-genome-bucket/o/deacon/3/panhuman-1.k31w61.idx">panhuman-1 Deacon index</a> (850MB).
+  </p>
 
 <div class="field">
   <label for="access-key">Access key ID</label>
@@ -65,9 +70,16 @@
   <input type="password" id="secret-key" autocomplete="off" spellcheck="false" placeholder="CLIMB S3 secret">
 </div>
 
+<div class="drop-zone" id="index-zone">
+  <input type="file" id="index-input" accept=".idx">
+  <div class="label">Drop a Deacon index (.idx), or click to select</div>
+  <div class="filename" id="index-name"></div>
+  <div class="idx-info" id="index-info"></div>
+</div>
+
 <div class="drop-zone" id="dir-zone">
   <input type="file" id="dir-input" webkitdirectory directory multiple>
-  <div class="label">Drop a directory of fasta/fastq[.gz|.zst] files, or click to select</div>
+  <div class="label">Drop a directory of fasta/fastq[.gz] files, or click to select</div>
   <div class="summary" id="dir-summary"></div>
 </div>
 
@@ -77,8 +89,10 @@
 </div>
 
 <div class="progress-wrap" id="progress-wrap" style="display:none">
-  <progress id="overall-progress" value="0" max="100"></progress>
-  <div class="progress-label" id="progress-label"></div>
+  <progress id="dehost-progress" value="0" max="100"></progress>
+  <div class="progress-label" id="dehost-label"></div>
+  <progress id="upload-progress" value="0" max="100"></progress>
+  <div class="progress-label" id="upload-label"></div>
   <ul id="file-list"></ul>
 </div>
 
