@@ -36,6 +36,8 @@ const MAX_INDEX_BYTES = 1024 * 1024 * 1024; // 1 GB
 const $ = (id) => document.getElementById(id);
 const accessKeyEl = $("access-key");
 const secretKeyEl = $("secret-key");
+const runNameEl = $("run-name");
+const namePrefixEl = $("name-prefix");
 const indexZone = $("index-zone");
 const indexInput = $("index-input");
 const indexName = $("index-name");
@@ -53,6 +55,7 @@ const statusEl = $("status");
 
 // --- State -------------------------------------------------------------------
 let selectedFiles = []; // { file, key } entries, sequence files only
+let fileRows = []; // { li, st } DOM rows, one per selected file (same order)
 let totalBytes = 0;
 let isUploading = false;
 let indexLoaded = false;
@@ -73,7 +76,7 @@ function humanBytes(n) {
     n /= 1024;
     i++;
   }
-  return `${n.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+  return `${n.toFixed(i === 0 ? 0 : 1)}${units[i]}`;
 }
 
 // Base counts use decimal SI units (1 Mbp = 1,000,000 bases).
@@ -84,12 +87,25 @@ function humanBases(bp) {
     bp /= 1000;
     i++;
   }
-  return `${bp.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+  return `${bp.toFixed(i === 0 ? 0 : 1)}${units[i]}`;
 }
 
 function timestampPrefix() {
-  // 2026-06-13T09-12-00Z — filesystem/key-safe ISO 8601 without ms or colons.
+  // 2026-06-13T09-12-00Z — filesystem/key-safe ISO 8601 (Zulu) without ms or colons.
   return new Date().toISOString().replace(/\.\d+Z$/, "Z").replace(/:/g, "-");
+}
+
+// Make a user-supplied name safe to use as a single path segment: trim, collapse
+// whitespace/slashes to hyphens, and strip leading/trailing dots and hyphens.
+function sanitizeName(s) {
+  return (s || "").trim().replace(/[\s/\\]+/g, "-").replace(/^[-.]+|[-.]+$/g, "");
+}
+
+// Upload directory name: "<timestamp>" alone, or "<timestamp>--<name>" when the
+// user has entered a name. The timestamp is fixed at upload time.
+function uploadDirName(timestamp) {
+  const name = sanitizeName(runNameEl.value);
+  return name ? `${timestamp}--${name}` : timestamp;
 }
 
 function updateUploadEnabled() {
@@ -136,8 +152,27 @@ function setSelection(files) {
   }
   setStatus("");
   progressWrap.style.display = "none";
-  fileListEl.innerHTML = "";
+  renderFileList();
   updateUploadEnabled();
+}
+
+// (Re)build the file list from the current selection, one row per file with a
+// blank status. Materialised as soon as files are selected; the rows are reused
+// (statuses set to "queued", then updated) when the upload starts.
+function renderFileList() {
+  fileListEl.innerHTML = "";
+  fileRows = selectedFiles.map(({ file }) => {
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = file.name;
+    const st = document.createElement("span");
+    st.className = "st";
+    li.append(name, st);
+    fileListEl.appendChild(li);
+    return { li, st };
+  });
+  fileListEl.style.display = fileRows.length ? "" : "none";
 }
 
 // --- WASM worker (dehosting) -------------------------------------------------
@@ -251,8 +286,8 @@ indexInput.addEventListener("change", () => {
 async function loadIndexFile(file) {
   if (file.size > MAX_INDEX_BYTES) {
     setStatus(
-      `Index file too large for browser use (${(file.size / 1024 / 1024).toFixed(0)} MB). ` +
-        `Maximum supported size is ${MAX_INDEX_BYTES / 1024 / 1024 / 1024} GB.`,
+      `Index file too large for browser use (${(file.size / 1024 / 1024).toFixed(0)}MB). ` +
+        `Maximum supported size is ${MAX_INDEX_BYTES / 1024 / 1024 / 1024}GB.`,
       "error"
     );
     return;
@@ -263,7 +298,7 @@ async function loadIndexFile(file) {
   updateUploadEnabled();
   indexName.textContent = file.name;
   indexInfo.textContent = "Loading…";
-  setStatus(`Loading index (${(file.size / 1024 / 1024).toFixed(0)} MB)…`);
+  setStatus(`Loading index (${(file.size / 1024 / 1024).toFixed(0)}MB)…`);
   const buf = await file.arrayBuffer();
   worker.postMessage({ type: MSG.LOAD_INDEX, data: buf }, [buf]);
 }
@@ -347,6 +382,16 @@ function readAllEntries(reader) {
   el.addEventListener("input", updateUploadEnabled)
 );
 
+// Keep the greyed, non-editable "<timestamp>--" prefix in the name field showing
+// the current Zulu time, so the caret sits right after the "--". (If no name is
+// entered the final directory drops the "--"; see uploadDirName.) The real value
+// is captured when the upload actually starts.
+function tickNamePrefix() {
+  namePrefixEl.textContent = `${timestampPrefix()}--`;
+}
+tickNamePrefix();
+setInterval(tickNamePrefix, 1000);
+
 resetBtn.addEventListener("click", () => {
   if (isUploading) return;
   dirInput.value = "";
@@ -362,9 +407,10 @@ async function uploadAll() {
   const secretAccessKey = secretKeyEl.value.trim();
 
   const timestamp = timestampPrefix();
+  const dirPrefix = uploadDirName(timestamp); // <timestamp> or <timestamp>--<name>
   const items = buildFileList(
     selectedFiles.map((s) => s.file),
-    timestamp
+    dirPrefix
   );
   if (!items.length) return;
 
@@ -382,25 +428,18 @@ async function uploadAll() {
   isUploading = true;
   updateUploadEnabled();
   resetBtn.disabled = true;
-  setStatus(`Uploading to ${timestamp}/ …`);
+  setStatus(`Uploading to ${dirPrefix}/ …`);
 
-  // Render per-file rows.
+  // Reuse the rows already materialised at selection time, resetting them to
+  // "queued" (order matches `items`, which is built from the same selection).
   progressWrap.style.display = "block";
-  fileListEl.innerHTML = "";
   dehostProgress.value = 0;
   dehostLabel.textContent = "";
-  const rows = items.map(({ file }) => {
-    const li = document.createElement("li");
-    const name = document.createElement("span");
-    name.className = "name";
-    name.textContent = file.name;
-    const st = document.createElement("span");
-    st.className = "st";
+  fileRows.forEach(({ li, st }) => {
+    li.className = "";
     st.textContent = "queued";
-    li.append(name, st);
-    fileListEl.appendChild(li);
-    return { li, st };
   });
+  const rows = fileRows;
 
   const client = new S3Client({
     endpoint: ENDPOINT,
@@ -420,23 +459,23 @@ async function uploadAll() {
     // Write a marker object recording the uploader's access key ID into the
     // timestamped directory before any sequence files. Doubles as an early
     // CORS/credentials check before the (potentially large) uploads start.
-    setStatus(`Creating ${timestamp}/access_key_id …`);
+    setStatus(`Creating ${dirPrefix}/access_key_id …`);
     await new Upload({
       client,
       params: {
         Bucket: BUCKET,
-        Key: `${timestamp}/access_key_id`,
+        Key: `${dirPrefix}/access_key_id`,
         Body: new Blob([accessKeyId], { type: "text/plain" }),
         ContentType: "text/plain",
       },
     }).done();
 
     inFileLoop = true;
-    setStatus(`Dehosting and uploading to ${timestamp}/ …`);
+    setStatus(`Filtering and uploading to ${dirPrefix}`);
     for (let i = 0; i < items.length; i++) {
       const { file, key } = items[i];
       rows[i].li.className = "active";
-      rows[i].st.textContent = "dehosting…";
+      rows[i].st.textContent = "filtering…";
 
       let curProcessed = 0; // input bytes dehosted for this file
       let curUploaded = 0; // output bytes uploaded for this file
@@ -445,15 +484,16 @@ async function uploadAll() {
 
       const renderRow = () => {
         const dpct = file.size ? Math.min(100, (curProcessed / file.size) * 100) : 100;
-        rows[i].st.textContent = `dehost ${dpct.toFixed(0)}% · up ${humanBytes(curUploaded)}`;
+        rows[i].st.textContent = `filtered ${dpct.toFixed(0)}% · uploaded ${humanBytes(curUploaded)}`;
       };
       const onProgress = (m) => {
         curProcessed = m.bytesProcessed || 0;
         const pct = totalBytes ? ((dehostedBefore + curProcessed) / totalBytes) * 100 : 0;
         dehostProgress.value = pct;
         dehostLabel.textContent =
-          `Dehosting · ${humanBytes(dehostedBefore + curProcessed)} / ${humanBytes(totalBytes)} ` +
-          `(${pct.toFixed(1)}%) — file ${i + 1} of ${items.length}`;
+          `Filtering ${i + 1} of ${items.length} · ` +
+          `${humanBytes(dehostedBefore + curProcessed)} / ${humanBytes(totalBytes)} ` +
+          `(${pct.toFixed(1)}%)`;
         renderRow();
       };
       const onStats = (stats, elapsed) => {
@@ -499,8 +539,8 @@ async function uploadAll() {
     }
 
     dehostProgress.value = 100;
-    dehostLabel.textContent = `Dehosted ${humanBases(totalBasesIn)} of input across ${completed} file${completed === 1 ? "" : "s"}.`;
-    setStatus(`Upload complete (${timestamp})`, "success");
+    dehostLabel.textContent = `Processed ${humanBases(totalBasesIn)} of input across ${completed} file${completed === 1 ? "" : "s"}.`;
+    setStatus(`Upload complete (${dirPrefix})`, "success");
   } catch (err) {
     const idx = completed; // the file that failed
     if (inFileLoop && rows[idx]) {
