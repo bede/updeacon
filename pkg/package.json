@@ -1,0 +1,15 @@
+{
+  "name": "deacon-wasm",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "deacon_wasm_bg.wasm",
+    "deacon_wasm.js",
+    "deacon_wasm.d.ts"
+  ],
+  "main": "deacon_wasm.js",
+  "types": "deacon_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
