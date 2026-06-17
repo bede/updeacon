@@ -8,6 +8,8 @@ SRC="/Users/bede/Research/git/updeacon"
 PAGES_ROOT="/Users/bede/Research/git/bede.github.io"
 DEST="$PAGES_ROOT/updeacon-s3"
 
+SOURCE_HASH="$(git -C "$SRC" rev-parse --short HEAD)"
+
 mkdir -p "$DEST/pkg" "$DEST/vendor"
 
 cp "$SRC/index.html"              "$DEST/"
@@ -18,11 +20,14 @@ cp "$SRC/vendor/aws-sdk.js"       "$DEST/vendor/"
 cp "$SRC/pkg/deacon_wasm.js"      "$DEST/pkg/"
 cp "$SRC/pkg/deacon_wasm_bg.wasm" "$DEST/pkg/"
 
+# Stamp the deployed app.js with the source commit so the page logs it on load.
+sed -i '' "s/const BUILD_COMMIT = \"dev\";/const BUILD_COMMIT = \"$SOURCE_HASH\";/" "$DEST/app.js"
+
 echo "Deployed to $DEST"
 
 cd "$PAGES_ROOT"
 branch="$(git rev-parse --abbrev-ref HEAD)"
-source_hash="$(git -C "$SRC" rev-parse --short HEAD)"
+source_hash="$SOURCE_HASH"
 git add updeacon-s3/index.html updeacon-s3/app.js updeacon-s3/worker.js updeacon-s3/protocol.js
 git add updeacon-s3/vendor/aws-sdk.js
 git add updeacon-s3/pkg/deacon_wasm.js updeacon-s3/pkg/deacon_wasm_bg.wasm

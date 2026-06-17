@@ -19,7 +19,9 @@ const ENDPOINT = "https://s3.climb.ac.uk";
 const BUCKET = "cli-artic-drc-co-inrb-uploads";
 const REGION = "us-east-1";
 
-console.log(`updeacon: bucket "${BUCKET}" at ${ENDPOINT}`);
+const BUILD_COMMIT = "dev";
+
+console.log(`updeacon: bucket "${BUCKET}" at ${ENDPOINT} (commit ${BUILD_COMMIT})`);
 
 const ASSET_VERSION = "20260617-1";
 
