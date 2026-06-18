@@ -80,6 +80,7 @@ let selectedFiles = []; // { file, key } entries, sequence files only
 let fileRows = []; // { li, st } DOM rows, one per selected file (same order)
 let totalBytes = 0;
 let isUploading = false;
+let frozenPrefix = null; // once an upload commits, the timestamp it was given
 let indexLoaded = false;
 let indexFilename = ""; // name of the loaded .idx (recorded in summaries)
 let indexK = null; // k-mer length parsed from the index info string
@@ -663,7 +664,9 @@ function readAllEntries(reader) {
 // entered the final directory drops the "--"; see uploadDirName.) The real value
 // is captured when the upload actually starts.
 function tickNamePrefix() {
-  namePrefixEl.textContent = `${timestampPrefix()}--`;
+  // Once an upload has committed to a name, stop ticking and show exactly the
+  // timestamp it was given, so the field matches what's actually being uploaded.
+  namePrefixEl.textContent = `${frozenPrefix ?? timestampPrefix()}--`;
 }
 tickNamePrefix();
 setInterval(tickNamePrefix, 1000);
@@ -805,6 +808,12 @@ async function uploadAll() {
     dirPrefix
   );
   if (!items.length) return;
+
+  // Commit to this name: freeze the live-ticking prefix to the timestamp we just
+  // captured and lock the name field, so neither drifts away from what's used.
+  frozenPrefix = timestamp;
+  runNameEl.readOnly = true;
+  tickNamePrefix();
 
   console.log("updeacon: deacon filter params", {
     index: indexFilename,
