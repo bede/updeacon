@@ -260,7 +260,7 @@ worker.onmessage = (e) => {
       const kw = /k=(\d+),\s*w=(\d+)/.exec(m.info || "");
       indexK = kw ? Number(kw[1]) : null;
       indexW = kw ? Number(kw[2]) : null;
-      setStatus("Index loaded. Enter S3 credentials and select sequences.");
+      setStatus("Index loaded. Select sequences and enter S3 credentials.");
       updateUploadEnabled();
       break;
     }
