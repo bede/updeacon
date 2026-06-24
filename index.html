@@ -100,14 +100,14 @@
 </style>
 </head>
 <body>
-<h1>updeacon-s3 <span class="beta-tag">beta</span></h1>
+<h1>updeacon-s3 <span class="beta-tag">alpha</span></h1>
 <p class="subtitle">Securely dehost and upload DNA sequences in fasta/fastq format directly to S3 object storage.
   Runs <a href="https://github.com/bede/deacon">Deacon</a> in the browser to deplete human sequences prior to upload. FASTQ files are uploaded to a timestamped directory prefix in the specified bucket. Nested directory structures are preserved.</p>
 <div class="usage">
   <b>Usage</b>
   <ol>
-    <li>Press 'Download index' to fetch the human Deacon index. You should only need to do this once. Alternatively, drag & drop a copy of <a href="https://objectstorage.uk-london-1.oraclecloud.com/n/lrbvkel2wjot/b/human-genome-bucket/o/deacon/3/panhuman-1.k31w21.pidx">panhuman-1</a>.</li>
-    <li>Drag &amp; drop fastq/fasta files you wish to upload, or a directory containing fastq files</li>
+    <li>Press 'Download index' to fetch &amp; cache the index. Alternatively, drag & drop a copy of <a href="https://objectstorage.uk-london-1.oraclecloud.com/n/lrbvkel2wjot/b/human-genome-bucket/o/deacon/3/panhuman-1.k31w21.pidx">panhuman-1</a>.</li>
+    <li>Drag  drop fastq/fasta files you wish to upload, or a directory containing fastq files. Paired reads are not currently supported.</li>
     <li>Enter S3-compatible object storage credentials and choose a descriptive name for your upload.</li>
     <li>Press either 'Filter & upload' or 'Filter only', and keep the browser open until completion.</li>
   </ol>
