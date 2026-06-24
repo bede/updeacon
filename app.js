@@ -34,7 +34,7 @@ const PART_SIZE = 8 * 1024 * 1024;
 const QUEUE_SIZE = 4;
 
 // Largest index we'll try to load into browser memory.
-const MAX_INDEX_BYTES = 1024 * 1024 * 1024; // 1 GB
+const MAX_INDEX_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB
 
 // Recommended index, downloaded and cached automatically on first visit. The
 // manual drop zone below is only a fallback for when this download fails.
@@ -257,6 +257,7 @@ worker.onmessage = (e) => {
       indexProgress.style.display = "none";
       indexRetry.hidden = true;
       indexDownload.hidden = true;
+      clearIndexLoading();
       indexInfo.textContent = m.info;
       // info looks like "k=31, w=61 (12,345 minimizers)" — pull out k and w for
       // the per-file JSON summaries.
@@ -276,6 +277,7 @@ worker.onmessage = (e) => {
     case MSG.ERROR:
       if (onWorkerError) onWorkerError(m.message);
       else {
+        clearIndexLoading();
         indexInfo.textContent = "";
         setStatus("Error: " + m.message, "error");
       }
@@ -373,7 +375,7 @@ async function loadIndexFile(file) {
   indexDownload.hidden = true;
   updateUploadEnabled();
   indexName.textContent = file.name;
-  indexInfo.textContent = "Loading…";
+  showIndexLoading("Loading");
   setStatus(`Loading index (${(file.size / 1024 / 1024).toFixed(0)}MB)…`);
   const buf = await file.arrayBuffer();
   sendIndexToWorker(buf);
@@ -442,6 +444,18 @@ async function clearCachedIndex(url) {
   }
 }
 
+// Show an indeterminate "loading" message in the index panel. The trailing dots
+// are animated by CSS (.loading-dots) while the worker parses the index; the
+// class is cleared once it reports loaded or fails.
+function showIndexLoading(label) {
+  indexInfo.textContent = label;
+  indexInfo.classList.add("loading-dots");
+}
+
+function clearIndexLoading() {
+  indexInfo.classList.remove("loading-dots");
+}
+
 // Hand index bytes to the worker, or stash them until the worker reports READY.
 function sendIndexToWorker(arrayBuffer) {
   if (workerReady) {
@@ -471,6 +485,7 @@ async function downloadIndex(url, onProgress) {
 }
 
 function showIndexProgress(received, total) {
+  clearIndexLoading();
   indexProgress.style.display = "";
   if (total) {
     const pct = (received / total) * 100;
@@ -488,6 +503,7 @@ function showIndexProgress(received, total) {
 function showIndexNeedsDownload() {
   indexNeedsDownload = true;
   indexFailed = false;
+  clearIndexLoading();
   indexProgress.style.display = "none";
   indexRetry.hidden = true;
   indexDownload.hidden = false;
@@ -496,7 +512,7 @@ function showIndexNeedsDownload() {
   indexDownload.classList.add("pulse-glow");
   indexName.textContent = ""; // the "Download panhuman-1 index" button stands in for the title here
   indexInfo.textContent =
-    "No Deacon index cached. Click to download or drag/drop local .idx file.";
+    "No Deacon index cached. Click to download or drop an .idx/.pidx file.";
   indexStatus.classList.remove("loaded", "failed");
   indexStatus.classList.add("needs-download");
   setStatus("");
@@ -510,11 +526,12 @@ function showIndexFailure(err) {
   console.error(err);
   indexFailed = true;
   indexNeedsDownload = false;
+  clearIndexLoading();
   indexProgress.style.display = "none";
   indexName.textContent = INDEX_DISPLAY_NAME;
   indexInfo.textContent =
     `Download failed (${err?.message || err}). ` +
-    "Click to select a local .idx, drag one here, or retry.";
+    "Click to select a local .idx/.pidx file, drag one here, or retry.";
   indexRetry.hidden = false;
   indexDownload.hidden = true;
   indexStatus.classList.remove("loaded", "needs-download");
@@ -536,7 +553,7 @@ async function initIndex() {
   try {
     const cached = await getCachedIndex(INDEX_URL);
     if (cached) {
-      indexInfo.textContent = "Loading cached index…";
+      showIndexLoading("Loading cached index");
       setStatus("Loading cached index…");
       sendIndexToWorker(await cached.arrayBuffer());
       return;
@@ -566,7 +583,7 @@ async function downloadAndLoadIndex() {
       console.warn("updeacon: failed to cache index", e)
     );
     indexProgress.style.display = "none";
-    indexInfo.textContent = "Loading index…";
+    showIndexLoading("Loading index");
     setStatus("Loading index…");
     sendIndexToWorker(await blob.arrayBuffer());
   } catch (err) {

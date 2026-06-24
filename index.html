@@ -45,6 +45,11 @@
   .index-status progress { width: 100%; margin-top: 0.5rem; }
   .index-status .idx-info { font-size: 0.8rem; color: #888; margin-top: 0.3rem; }
   .index-status .idx-info:empty { display: none; }
+  /* Animated trailing dots for indeterminate "Loading…" states. The ::after
+     content cycles 0–3 dots so the panel shows activity while the worker parses
+     the index. A fixed-width inline-block keeps the label from shifting. */
+  .idx-info.loading-dots::after { content: ""; display: inline-block; width: 1.2em; text-align: left; animation: loading-dots 1.2s steps(4, end) infinite; }
+  @keyframes loading-dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75%, 100% { content: "..."; } }
   .index-status .index-actions { display: flex; gap: 0.8rem; justify-content: center; }
   .index-status button { margin-bottom: 0.6rem; padding: 0.4rem 1rem; font-size: 0.85rem; }
   .index-status.loaded { border-color: #4caf50; background: #f0fff0; }
@@ -121,7 +126,7 @@
 
 <div class="drop-zone" id="dir-zone">
   <input type="file" id="dir-input" webkitdirectory directory multiple>
-  <div class="label">Drop a directory of fasta/fastq[.gz] files, or click to select</div>
+  <div class="label">Drop a directory of fasta/fastq[.gz] files, or click to select.</div>
   <div class="summary" id="dir-summary"></div>
 </div>
 
