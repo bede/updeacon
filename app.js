@@ -8,7 +8,7 @@
 // never leave the machine. The AWS SDK is vendored locally as a single bundled
 // module (vendor/aws-sdk.js) so the page has no runtime CDN dependency.
 import { S3Client, Upload } from "./vendor/aws-sdk.js";
-import { MSG, FILTER_DEFAULTS, DEACON_VERSION, UPDEACON_VERSION } from "./protocol.js?v=20260623-202559";
+import { MSG, FILTER_DEFAULTS, DEACON_VERSION, UPDEACON_VERSION } from "./protocol.js?v=20260624-191102";
 
 // --- Fixed configuration -----------------------------------------------------
 // CLIMB uses Ceph RADOS Gateway (S3-compatible), not real AWS, so:
@@ -23,7 +23,7 @@ const BUILD_COMMIT = "dev";
 
 console.log(`updeacon ${UPDEACON_VERSION}: bucket "${BUCKET}" at ${ENDPOINT} (commit ${BUILD_COMMIT})`);
 
-const ASSET_VERSION = "20260623-202559";
+const ASSET_VERSION = "20260624-191102";
 
 // Matches fastq/fasta sequence files, optionally .gz compressed (fq/fa short
 // forms included).
@@ -39,8 +39,8 @@ const MAX_INDEX_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB
 // Recommended index, downloaded and cached automatically on first visit. The
 // manual drop zone below is only a fallback for when this download fails.
 const INDEX_URL =
-  "https://objectstorage.uk-london-1.oraclecloud.com/n/lrbvkel2wjot/b/human-genome-bucket/o/deacon/3/panhuman-1.k31w61.idx";
-const INDEX_FILENAME = "panhuman-1.k31w61.idx";
+  "https://objectstorage.uk-london-1.oraclecloud.com/n/lrbvkel2wjot/b/human-genome-bucket/o/deacon/3/panhuman-1.k31w21.pidx";
+const INDEX_FILENAME = "panhuman-1.k31w21.pidx";
 const INDEX_DISPLAY_NAME = "Index: panhuman-1"; // shown in the panel; filename is kept for summaries
 
 // --- DOM ---------------------------------------------------------------------
@@ -444,6 +444,25 @@ async function clearCachedIndex(url) {
   }
 }
 
+// Delete cached blobs for any index other than `keepUrl`. Entries are keyed by
+// URL, so when the recommended index changes (e.g. a new panhuman release) the
+// previous blob would otherwise linger in IndexedDB forever, wasting hundreds of
+// MB. Called on startup to garbage-collect stale indexes.
+async function pruneStaleIndexes(keepUrl) {
+  const db = await openIdxDB();
+  try {
+    const store = db.transaction(IDB_STORE, "readwrite").objectStore(IDB_STORE);
+    const keys = await idbRequest(() => store.getAllKeys());
+    await Promise.all(
+      keys
+        .filter((key) => key !== keepUrl)
+        .map((key) => idbRequest(() => store.delete(key)))
+    );
+  } finally {
+    db.close();
+  }
+}
+
 // Show an indeterminate "loading" message in the index panel. The trailing dots
 // are animated by CSS (.loading-dots) while the worker parses the index; the
 // class is cleared once it reports loaded or fails.
@@ -550,6 +569,10 @@ async function initIndex() {
   indexRetry.hidden = true;
   indexDownload.hidden = true;
   indexStatus.classList.remove("failed", "needs-download", "loaded", "dragover");
+  // Drop any previously cached index that is no longer the recommended one.
+  pruneStaleIndexes(INDEX_URL).catch((e) =>
+    console.warn("updeacon: failed to prune stale cached indexes", e)
+  );
   try {
     const cached = await getCachedIndex(INDEX_URL);
     if (cached) {
