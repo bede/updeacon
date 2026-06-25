@@ -1,20 +1,12 @@
-// updeacon — client-side fastq/fasta dehosting + uploader for the CLIMB
-// S3-compatible store.
-//
-// Everything runs in the browser. Each selected file is decontaminated with
-// Deacon (compiled to WebAssembly, run in a Web Worker) and the filtered output
-// is streamed *directly* into the S3 multipart upload as it is produced — so
-// dehosting and uploading of a file happen simultaneously and contaminant reads
-// never leave the machine. The AWS SDK is vendored locally as a single bundled
-// module (vendor/aws-sdk.js) so the page has no runtime CDN dependency.
+// updeacon — client-side fastq/fasta dehosting + uploader for the CLIMB S3-compatible store.
+// Each file is filtered by Deacon (WASM, in a Worker) and streamed straight into the S3 multipart
+// upload as produced, so contaminant reads never leave the machine. AWS SDK is vendored (no CDN dep).
 import { S3Client, Upload } from "./vendor/aws-sdk.js";
 import { MSG, FILTER_DEFAULTS, DEACON_VERSION, UPDEACON_VERSION } from "./protocol.js?v=20260624-191102";
 
 // --- Fixed configuration -----------------------------------------------------
-// CLIMB uses Ceph RADOS Gateway (S3-compatible), not real AWS, so:
-//   - `endpoint` points at the gateway,
-//   - `region` is a dummy value the gateway ignores but the SDK requires,
-//   - `forcePathStyle` is required (RGW does not do virtual-host-style buckets).
+// CLIMB is Ceph RADOS Gateway, not real AWS: endpoint targets the gateway, region is a dummy the SDK requires,
+// and forcePathStyle is mandatory (RGW has no virtual-host-style buckets).
 const ENDPOINT = "https://s3.climb.ac.uk";
 const BUCKET = "cli-artic-drc-co-inrb-uploads";
 const REGION = "us-east-1";
@@ -25,8 +17,7 @@ console.log(`updeacon ${UPDEACON_VERSION}: bucket "${BUCKET}" at ${ENDPOINT} (co
 
 const ASSET_VERSION = "20260624-191102";
 
-// Matches fastq/fasta sequence files, optionally .gz compressed (fq/fa short
-// forms included).
+// Matches fastq/fasta files, optionally .gz (fq/fa short forms included).
 const SEQ_RE = /\.(fastq|fq|fasta|fa)(\.gz)?$/i;
 
 // Multipart tuning: 8 MiB parts, up to 4 concurrent parts per file.
@@ -36,8 +27,7 @@ const QUEUE_SIZE = 4;
 // Largest index we'll try to load into browser memory.
 const MAX_INDEX_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB
 
-// Recommended index, downloaded and cached automatically on first visit. The
-// manual drop zone below is only a fallback for when this download fails.
+// Recommended index, cached on first download; the manual drop zone is a fallback if download fails.
 const INDEX_URL =
   "https://objectstorage.uk-london-1.oraclecloud.com/n/lrbvkel2wjot/b/human-genome-bucket/o/deacon/3/panhuman-1.k31w21.pidx";
 const INDEX_FILENAME = "panhuman-1.k31w21.pidx";
@@ -71,8 +61,7 @@ const fileListEl = $("file-list");
 const statusEl = $("status");
 const purgeIndexEl = $("purge-index");
 
-// Prefill the bucket and server fields with the defaults, preserving any values
-// the browser restored. BUCKET/ENDPOINT stay the source of truth for defaults.
+// Prefill bucket/server with the defaults, preserving anything the browser restored.
 bucketEl.value = bucketEl.value || BUCKET;
 serverEl.value = serverEl.value || ENDPOINT;
 
@@ -120,41 +109,36 @@ function humanBases(bp) {
 }
 
 function timestampPrefix() {
-  // 2026-06-13T09-12-00Z — filesystem/key-safe ISO 8601 (Zulu) without ms or colons.
+  // 2026-06-13T09-12-00Z — filesystem/key-safe ISO 8601 (Zulu), no ms or colons.
   return new Date().toISOString().replace(/\.\d+Z$/, "Z").replace(/:/g, "-");
 }
 
-// Make a user-supplied name safe to use as a single path segment: trim, collapse
-// whitespace/slashes to hyphens, and strip leading/trailing dots and hyphens.
+// Make a name safe as one path segment: trim, whitespace/slashes to hyphens, strip leading/trailing dots/hyphens.
 function sanitizeName(s) {
   return (s || "").trim().replace(/[\s/\\]+/g, "-").replace(/^[-.]+|[-.]+$/g, "");
 }
 
-// Upload directory name: "<timestamp>" alone, or "<timestamp>--<name>" when the
-// user has entered a name. The timestamp is fixed at upload time.
+// Upload dir name: "<timestamp>" or "<timestamp>--<name>"; timestamp fixed at upload time.
 function uploadDirName(timestamp) {
   const name = sanitizeName(runNameEl.value);
   return name ? `${timestamp}--${name}` : timestamp;
 }
 
-// Toggle a button's disabled state, giving it a strong pulsing glow while it's
-// clickable so the available action draws the eye.
+// Toggle a button's disabled state, pulsing-glow while clickable to draw the eye.
 function setButtonDisabled(btn, disabled) {
   btn.disabled = disabled;
   btn.classList.toggle("pulse-glow", !disabled);
 }
 
 function updateUploadEnabled() {
-  // Downloading the index is handled by the "Download index" button inside the
-  // index panel, so the action buttons here just stay disabled until an index is
-  // loaded (and the "Filter only" button needs files too).
+  // Index download is handled by the panel's own button; action buttons stay disabled until an index is loaded.
   if (!indexLoaded || uploadCompleted) {
     setButtonDisabled(uploadBtn, true);
     setButtonDisabled(filterBtn, true);
     return;
   }
   const haveFiles = selectedFiles.length > 0;
-  // "Filter only" runs locally — it just needs an index and files, no S3 details.
+  // "Filter only" runs locally — needs an index and files, no S3 details.
   setButtonDisabled(filterBtn, isUploading || !haveFiles);
   setButtonDisabled(
     uploadBtn,
@@ -167,16 +151,13 @@ function updateUploadEnabled() {
   );
 }
 
-// Build the upload list from a flat array of File objects. Keys are
-// `<timestamp>/<relative path>`, preserving the directory structure of the
-// selected folder (including the chosen folder name) and keeping filenames
-// intact. Preserving full relative paths also means basenames never collide.
+// Build the upload list from a flat File[]. Keys are `<timestamp>/<relative path>`, preserving folder
+// structure; full relative paths mean basenames never collide.
 function buildFileList(files, timestamp) {
   return files
     .filter((f) => SEQ_RE.test(f.name))
     .map((file) => {
-      // webkitRelativePath is e.g. "myrun/laneA/sample.fastq.gz"; fall back to
-      // the bare filename if the browser didn't provide a relative path.
+      // webkitRelativePath e.g. "myrun/laneA/sample.fastq.gz"; fall back to the bare filename.
       const rel = file.webkitRelativePath || file.name;
       return { file, key: `${timestamp}/${rel}` };
     });
@@ -185,8 +166,7 @@ function buildFileList(files, timestamp) {
 function setSelection(files) {
   // A fresh selection clears the post-upload lock so the buttons can re-enable.
   uploadCompleted = false;
-  // `files` here is just for display/count; keys are finalised at upload time
-  // so the timestamp reflects when the upload actually starts.
+  // `files` is display/count only; keys are finalised at upload time so the timestamp reflects upload start.
   const seqs = files.filter((f) => SEQ_RE.test(f.name));
   selectedFiles = seqs.map((file) => ({ file, key: null }));
   totalBytes = seqs.reduce((sum, f) => sum + f.size, 0);
@@ -208,9 +188,7 @@ function setSelection(files) {
   updateUploadEnabled();
 }
 
-// (Re)build the file list from the current selection, one row per file with a
-// blank status. Materialised as soon as files are selected; the rows are reused
-// (statuses set to "queued", then updated) when the upload starts.
+// (Re)build the file list, one blank-status row per file; rows are reused (set to "queued") when the upload starts.
 function renderFileList() {
   fileListEl.innerHTML = "";
   fileRows = selectedFiles.map(({ file }) => {
@@ -230,8 +208,7 @@ function renderFileList() {
 // --- WASM worker (dehosting) -------------------------------------------------
 const worker = new Worker(`./worker.js?v=${ASSET_VERSION}`, { type: "module" });
 
-// While a file is being filtered these route the worker's streaming replies to
-// the active per-file handlers (one file is processed at a time).
+// Route the worker's streaming replies to the active per-file handlers (one file at a time).
 let onOutputBatch = null; // (msg) => void  — next OUTPUT_CHUNK_BATCH
 let onDehostProgress = null; // (msg) => void  — PROGRESS for the active file
 let onWorkerError = null; // (message) => void — abort the active pull
@@ -259,8 +236,7 @@ worker.onmessage = (e) => {
       indexDownload.hidden = true;
       clearIndexLoading();
       indexInfo.textContent = m.info;
-      // info looks like "k=31, w=61 (12,345 minimizers)" — pull out k and w for
-      // the per-file JSON summaries.
+      // info looks like "k=31, w=61 (12,345 minimizers)" — pull out k and w for the JSON summaries.
       const kw = /k=(\d+),\s*w=(\d+)/.exec(m.info || "");
       indexK = kw ? Number(kw[1]) : null;
       indexW = kw ? Number(kw[2]) : null;
@@ -289,11 +265,8 @@ worker.onmessage = (e) => {
 
 worker.postMessage({ type: MSG.INIT });
 
-// Returns a ReadableStream of the dehosted bytes of `file`. The stream is
-// pull-driven: each `pull` asks the worker for the next output batch, so the S3
-// upload (which consumes this stream) paces the WASM filter and memory stays
-// bounded. `hooks.onProgress(msg)` fires as input is consumed;
-// `hooks.onStats(stats)` fires once when filtering completes.
+// ReadableStream of `file`'s dehosted bytes. Pull-driven: each pull asks the worker for the next batch, so the
+// S3 consumer paces the filter and memory stays bounded. hooks.onProgress fires as input is consumed; onStats once at end.
 function dehostStream(file, hooks) {
   return new ReadableStream({
     start() {
@@ -322,7 +295,7 @@ function dehostStream(file, hooks) {
       });
     },
     cancel() {
-      // Drop our handlers; the worker disposes its session on the next FILTER.
+      // Drop handlers; the worker disposes its session on the next FILTER.
       onOutputBatch = null;
       onDehostProgress = null;
       onWorkerError = null;
@@ -331,10 +304,8 @@ function dehostStream(file, hooks) {
 }
 
 // --- Index selection ----------------------------------------------------------
-// The index panel becomes an actionable target in two cases: when the index
-// isn't cached (click downloads it) or when a download failed (click selects a
-// local .idx). A local .idx can be dropped in either state; otherwise the panel
-// is a passive status display.
+// The panel is actionable when the index isn't cached (click downloads) or a download failed (click selects a
+// local .idx); a local .idx can be dropped in either state. Otherwise it's a passive status display.
 indexStatus.addEventListener("click", () => {
   if (isUploading) return;
   if (indexNeedsDownload) downloadAndLoadIndex();
@@ -382,9 +353,7 @@ async function loadIndexFile(file) {
 }
 
 // --- Index auto-download + cache ---------------------------------------------
-// The recommended index is fetched once and cached in IndexedDB so reloads are
-// instant and work offline. IndexedDB (not localStorage/Cache API) is used
-// because it reliably stores the ~850 MB binary blob.
+// Fetched once and cached in IndexedDB (reliable for the ~850 MB blob) so reloads are instant and work offline.
 const IDB_NAME = "updeacon";
 const IDB_STORE = "index";
 
@@ -417,7 +386,7 @@ async function getCachedIndex(url) {
 }
 
 async function putCachedIndex(url, blob) {
-  // Ask the browser to keep this large blob around rather than evict it.
+  // Ask the browser to persist this large blob rather than evict it.
   if (navigator.storage?.persist) {
     try {
       await navigator.storage.persist();
@@ -444,10 +413,8 @@ async function clearCachedIndex(url) {
   }
 }
 
-// Delete cached blobs for any index other than `keepUrl`. Entries are keyed by
-// URL, so when the recommended index changes (e.g. a new panhuman release) the
-// previous blob would otherwise linger in IndexedDB forever, wasting hundreds of
-// MB. Called on startup to garbage-collect stale indexes.
+// Delete cached blobs for any index other than `keepUrl`. Keyed by URL, so a new recommended index would otherwise
+// leave the old blob lingering forever; called on startup to GC stale indexes.
 async function pruneStaleIndexes(keepUrl) {
   const db = await openIdxDB();
   try {
@@ -463,9 +430,7 @@ async function pruneStaleIndexes(keepUrl) {
   }
 }
 
-// Show an indeterminate "loading" message in the index panel. The trailing dots
-// are animated by CSS (.loading-dots) while the worker parses the index; the
-// class is cleared once it reports loaded or fails.
+// Show an indeterminate "loading" message; trailing dots animated by CSS (.loading-dots), cleared on loaded/fail.
 function showIndexLoading(label) {
   indexInfo.textContent = label;
   indexInfo.classList.add("loading-dots");
@@ -484,8 +449,7 @@ function sendIndexToWorker(arrayBuffer) {
   }
 }
 
-// Stream the index down with progress, returning it as a Blob. Throws on a
-// non-OK response or a network/CORS failure.
+// Stream the index down with progress, returning a Blob; throws on non-OK response or network/CORS failure.
 async function downloadIndex(url, onProgress) {
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
@@ -517,8 +481,7 @@ function showIndexProgress(received, total) {
   }
 }
 
-// Prompt to download: a clickable/droppable dashed panel shown when the index
-// isn't cached. Clicking starts the download; a local .idx can also be dropped.
+// Prompt to download: clickable/droppable dashed panel shown when the index isn't cached (click downloads, or drop a local .idx).
 function showIndexNeedsDownload() {
   indexNeedsDownload = true;
   indexFailed = false;
@@ -529,7 +492,7 @@ function showIndexNeedsDownload() {
   indexDownload.classList.remove("pulse-glow");
   void indexDownload.offsetWidth;
   indexDownload.classList.add("pulse-glow");
-  indexName.textContent = ""; // the "Download panhuman-1 index" button stands in for the title here
+  indexName.textContent = ""; // the download button stands in for the title here
   indexInfo.textContent =
     "No Deacon index cached. Click to download or drop an .idx/.pidx file.";
   indexStatus.classList.remove("loaded", "failed");
@@ -538,9 +501,7 @@ function showIndexNeedsDownload() {
   updateUploadEnabled(); // button becomes "Download index"
 }
 
-// Turn the index panel into the manual fallback after a failed download: a
-// clickable/droppable dashed target with a Retry button. Keeps everything in
-// one box rather than stacking a separate drop zone and an error banner.
+// Manual fallback after a failed download: clickable/droppable dashed target with a Retry button, all in one box.
 function showIndexFailure(err) {
   console.error(err);
   indexFailed = true;
@@ -559,8 +520,7 @@ function showIndexFailure(err) {
   updateUploadEnabled(); // button becomes "Download index" (retry)
 }
 
-// Startup: load the cached index immediately if present; otherwise prompt the
-// user to download it (no automatic download).
+// Startup: load the cached index if present, else prompt to download (no automatic download).
 async function initIndex() {
   indexFilename = INDEX_FILENAME;
   indexFailed = false;
@@ -569,7 +529,7 @@ async function initIndex() {
   indexRetry.hidden = true;
   indexDownload.hidden = true;
   indexStatus.classList.remove("failed", "needs-download", "loaded", "dragover");
-  // Drop any previously cached index that is no longer the recommended one.
+  // Drop any cached index that's no longer the recommended one.
   pruneStaleIndexes(INDEX_URL).catch((e) =>
     console.warn("updeacon: failed to prune stale cached indexes", e)
   );
@@ -624,13 +584,11 @@ indexRetry.addEventListener("click", (e) => {
   downloadAndLoadIndex();
 });
 
-// Purge the cached index from IndexedDB, free it from the worker, and return the
-// panel to the "click to download" state.
+// Purge the cached index from IndexedDB, free it from the worker, and reset the panel to "click to download".
 purgeIndexEl.addEventListener("click", async (e) => {
   e.preventDefault();
   if (isUploading) return;
-  // Update the UI synchronously first — Safari's IndexedDB can stall, so don't
-  // gate the visible reset on the (awaited) cache deletion.
+  // Update the UI synchronously first — Safari's IndexedDB can stall, so don't gate the visible reset on cache deletion.
   indexLoaded = false;
   worker.postMessage({ type: MSG.RESET });
   updateUploadEnabled();
@@ -675,8 +633,7 @@ dirZone.addEventListener("drop", async (e) => {
   }
 });
 
-// Recursively walk dropped FileSystemEntry objects into a flat File[] list,
-// stamping webkitRelativePath so collision handling works the same as the picker.
+// Recursively walk dropped FileSystemEntry objects into a flat File[], stamping webkitRelativePath like the picker.
 async function collectEntries(entries, prefix = "") {
   const out = [];
   for (const entry of entries) {
@@ -701,7 +658,7 @@ async function collectEntries(entries, prefix = "") {
 }
 
 function readAllEntries(reader) {
-  // readEntries returns at most ~100 entries per call; loop until exhausted.
+  // readEntries returns ~100 entries per call; loop until exhausted.
   return new Promise((resolve, reject) => {
     const all = [];
     const next = () =>
@@ -717,20 +674,15 @@ function readAllEntries(reader) {
 }
 
 // --- Upload ------------------------------------------------------------------
-// Access key ID persistence is left to the browser's native form autofill (the
-// field has a name + autocomplete). The secret key field has autocomplete off,
-// so the browser won't offer to remember it.
+// Access key ID persistence is left to browser autofill; the secret key field has autocomplete off.
 [bucketEl, serverEl, accessKeyEl, secretKeyEl].forEach((el) =>
   el.addEventListener("input", updateUploadEnabled)
 );
 
-// Keep the greyed, non-editable "<timestamp>--" prefix in the name field showing
-// the current Zulu time, so the caret sits right after the "--". (If no name is
-// entered the final directory drops the "--"; see uploadDirName.) The real value
-// is captured when the upload actually starts.
+// Tick the greyed "<timestamp>--" prefix to the current Zulu time so the caret sits after the "--".
+// (No name drops the "--"; see uploadDirName.) The real value is captured at upload start.
 function tickNamePrefix() {
-  // Once an upload has committed to a name, stop ticking and show exactly the
-  // timestamp it was given, so the field matches what's actually being uploaded.
+  // Once an upload commits to a name, freeze to the timestamp it was given so the field matches what's uploaded.
   namePrefixEl.textContent = `${frozenPrefix ?? timestampPrefix()}--`;
 }
 tickNamePrefix();
@@ -760,10 +712,8 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// Filter (dehost) each selected file locally and save the cleaned output to the
-// user's machine — no S3, no credentials. Reuses the same WASM pull-stream as the
-// upload path; the filtered output is collected into a Blob and downloaded under
-// the original filename (compression matches the input, so the name stays valid).
+// Filter each selected file locally and save the output — no S3, no credentials. Reuses the upload path's
+// pull-stream; output is collected into a Blob and downloaded under the original filename (compression matches input).
 async function filterOnly() {
   const files = selectedFiles.map((s) => s.file).filter((f) => SEQ_RE.test(f.name));
   if (!files.length) return;
@@ -778,7 +728,7 @@ async function filterOnly() {
     prefix_length: FILTER_DEFAULTS.prefixLength,
   });
 
-  isUploading = true; // reuse the "busy" flag: blocks the other buttons + reset
+  isUploading = true; // reuse the "busy" flag: blocks other buttons + reset
   updateUploadEnabled();
   resetBtn.disabled = true;
   setStatus("Filtering…");
@@ -822,8 +772,7 @@ async function filterOnly() {
         fileStats = stats;
       };
 
-      // Response.blob() drains the pull-stream, so the WASM filter is paced by
-      // the read and the dehosted output is materialised in memory before saving.
+      // Response.blob() drains the pull-stream, pacing the filter and materialising output in memory before saving.
       const stream = dehostStream(file, { onProgress, onStats });
       const blob = await new Response(stream).blob();
       downloadBlob(blob, file.name);
@@ -871,8 +820,7 @@ async function uploadAll() {
   );
   if (!items.length) return;
 
-  // Commit to this name: freeze the live-ticking prefix to the timestamp we just
-  // captured and lock the name field, so neither drifts away from what's used.
+  // Commit to this name: freeze the ticking prefix to the captured timestamp and lock the field so neither drifts.
   frozenPrefix = timestamp;
   runNameEl.readOnly = true;
   tickNamePrefix();
@@ -892,8 +840,7 @@ async function uploadAll() {
   resetBtn.disabled = true;
   setStatus(`Uploading to ${dirPrefix}/ …`);
 
-  // Reuse the rows already materialised at selection time, resetting them to
-  // "queued" (order matches `items`, which is built from the same selection).
+  // Reuse the rows from selection time, reset to "queued" (order matches `items`, built from the same selection).
   progressWrap.style.display = "block";
   dehostProgress.value = 0;
   dehostLabel.textContent = "";
@@ -910,8 +857,7 @@ async function uploadAll() {
     credentials: { accessKeyId, secretAccessKey },
   });
 
-  // Overall progress is an exact % of input bytes dehosted (we know the source
-  // sizes). Per-file rows additionally show bytes uploaded.
+  // Overall progress is an exact % of input bytes dehosted; per-file rows also show bytes uploaded.
   let dehostedBefore = 0; // input bytes of fully-dehosted files
   let totalBasesIn = 0; // input bases dehosted (from per-file stats)
 
@@ -919,8 +865,7 @@ async function uploadAll() {
   let inFileLoop = false;
   const uploadedKeys = []; // every object written, in upload order (manifest contents)
   try {
-    // CORS probe. RGW sends the CORS header on an anonymous 403 but not a
-    // bad-signature one, so this resolves iff CORS works. No headers (preflight).
+    // CORS probe: RGW sends the CORS header on an anonymous 403, so this resolves iff CORS works (no preflight headers).
     setStatus("Checking connection …");
     let corsOk = false;
     try {
@@ -939,7 +884,7 @@ async function uploadAll() {
       throw e;
     }
 
-    // Credential check (also writes the _ACCESS_KEY_ID.txt marker). CORS is checked, so any failure here is the credentials.
+    // Credential check (also writes the _ACCESS_KEY_ID.txt marker); CORS already passed, so any failure here is credentials.
     setStatus(`Checking credentials …`);
     try {
       await new Upload({
@@ -1029,7 +974,7 @@ async function uploadAll() {
     dehostProgress.value = 100;
     dehostLabel.textContent = `Processed ${humanBases(totalBasesIn)} of input across ${completed} file${completed === 1 ? "" : "s"}.`;
 
-    // Write the file manifest *last*, signalling upload completion
+    // Write the manifest last, signalling upload completion.
     setStatus("Finalising (writing manifest) …");
     await new Upload({
       client,
@@ -1058,11 +1003,8 @@ async function uploadAll() {
   }
 }
 
-// Build a Deacon-style JSON summary for one dehosted file, mirroring the schema
-// the `deacon` CLI emits. Counts come from the WASM session's stats; thresholds
-// and version come from the shared config. Fields that don't apply to the
-// browser pipeline (paired reads, renaming, separate total timing) are left at
-// their inert defaults.
+// Build a Deacon-style JSON summary mirroring the `deacon` CLI schema; counts from session stats, thresholds/version
+// from shared config. Fields that don't apply here (paired reads, renaming, separate total timing) stay at inert defaults.
 function buildSummary({ file, key, stats, elapsed }) {
   const seqsIn = Number(stats?.readsIn || 0);
   const seqsOut = Number(stats?.readsOut || 0);
@@ -1120,7 +1062,7 @@ function formatError(err) {
       `bucket must allow PUT/POST from this origin and expose the ETag header.`
     );
   }
-  // Worker fetch() classically throws TypeError on network/CORS failures, exact errr msg varies by browser
+  // fetch() throws TypeError on network/CORS failures; exact message varies by browser.
   if (
     name === "TypeError" ||
     /CORS|Failed to fetch|NetworkError|Load failed/i.test(msg)
@@ -1137,8 +1079,6 @@ function formatError(err) {
 }
 
 // --- Startup -----------------------------------------------------------------
-// Kick off the index download/cache lookup, in parallel with WASM init;
-// sendIndexToWorker queues the bytes until the worker reports READY. Invoked
-// last so all module-level declarations (IndexedDB constants, helpers) are
-// initialized before it runs.
+// Kick off the index download/cache lookup in parallel with WASM init (bytes queue until READY).
+// Invoked last so all module-level declarations are initialised before it runs.
 initIndex();

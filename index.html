@@ -45,9 +45,7 @@
   .index-status progress { width: 100%; margin-top: 0.5rem; }
   .index-status .idx-info { font-size: 0.8rem; color: #888; margin-top: 0.3rem; }
   .index-status .idx-info:empty { display: none; }
-  /* Animated trailing dots for indeterminate "Loading…" states. The ::after
-     content cycles 0–3 dots so the panel shows activity while the worker parses
-     the index. A fixed-width inline-block keeps the label from shifting. */
+  /* Animated trailing dots for "Loading…" states; ::after cycles 0–3 dots, fixed-width so the label doesn't shift. */
   .idx-info.loading-dots::after { content: ""; display: inline-block; width: 1.2em; text-align: left; animation: loading-dots 1.2s steps(4, end) infinite; }
   @keyframes loading-dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75%, 100% { content: "..."; } }
   .index-status .index-actions { display: flex; gap: 0.8rem; justify-content: center; }
@@ -62,8 +60,7 @@
   /* Primary (filled purple) */
   button { background: #936dd0; color: #fff; border: 1px solid transparent; padding: 0.6rem 1.5rem; cursor: pointer; font-size: 0.95rem; transition: all 0.15s; }
   button:hover:not(:disabled) { background: #835dc1; }
-  /* Action buttons are greyed out while inactive, then fill purple once their
-     required fields are satisfied. */
+  /* Action buttons grey out while inactive, fill purple once their required fields are satisfied. */
   button:disabled { background: #ececec; color: #aaa; border-color: transparent; cursor: not-allowed; }
   /* Secondary (outlined): Reset = grey. Filter only uses the filled purple primary style. */
   #reset-btn { background: #fff; color: #6c757d; border-color: #ced4da; }

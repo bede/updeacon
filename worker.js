@@ -1,19 +1,13 @@
 import { MSG, FILTER_DEFAULTS } from "./protocol.js?v=20260624-191102";
 
 // Web Worker for off-main-thread WASM dehosting (deacon filtering).
-//
-// Adapted from deacon-wasm's worker. The key difference here is that filtering
-// is *pull-driven*: the main thread requests output one batch at a time (via
-// MSG.PULL) as the S3 upload consumes it, so dehosting applies backpressure and
-// memory stays bounded to roughly one batch + one in-flight upload part.
+// Pull-driven: main thread requests one batch per MSG.PULL as the upload consumes it, so memory stays bounded.
 let wasm = null;
 let index = null;
 const ASSET_VERSION = "20260624-191102";
 const OUTPUT_BATCH_BYTES = 4 * 1024 * 1024; // 4 MiB
 
-// wasm-bindgen throws errors from `Result<_, JsValue>` as plain strings (via
-// JsValue::from_str), which have no `.message`. Reading `err.message` blindly
-// turns those into "undefined", hiding the real reason — so normalise here.
+// wasm-bindgen throws Result errors as plain strings with no `.message`; normalise so the reason isn't lost
 function errText(err) {
   if (err == null) return "Unknown error";
   if (typeof err === "string") return err;
@@ -82,9 +76,7 @@ function postProgress() {
   });
 }
 
-// Pump input until at least one output batch is ready or the input is exhausted,
-// then post exactly one OUTPUT_CHUNK_BATCH back. When the input ends, finalize the
-// session and mark the batch `done: true` with the run stats attached.
+// Pump input until one output batch is ready or input ends, then post one OUTPUT_CHUNK_BATCH (done:true + stats at EOF)
 async function pump() {
   const a = active;
   while (a.pendingBytes < OUTPUT_BATCH_BYTES && !a.finished) {
@@ -165,8 +157,7 @@ self.onmessage = async function (e) {
       index = new wasm.WasmIndex(new Uint8Array(data));
       self.postMessage({ type: MSG.INDEX_LOADED, info: index.info() });
     } catch (err) {
-      // The wasm error already carries a "Failed to load index: …" prefix, so
-      // surface it as-is rather than double-prefixing.
+      // wasm error already carries a "Failed to load index: …" prefix; surface as-is
       self.postMessage({ type: MSG.ERROR, message: errText(err) });
     }
     return;
