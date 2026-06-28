@@ -1,7 +1,7 @@
 /* tslint:disable */
 /* eslint-disable */
 
-export class WasmFilterSession {
+export class FilterSession {
     free(): void;
     [Symbol.dispose](): void;
     finish(): Uint8Array;
@@ -9,6 +9,17 @@ export class WasmFilterSession {
     output_compressed(): boolean;
     pending_bytes(): number;
     push_chunk(chunk: Uint8Array): Uint8Array;
+    stats(): any;
+}
+
+export class PairedFilterSession {
+    free(): void;
+    [Symbol.dispose](): void;
+    finish_r1(): any;
+    finish_r2(): any;
+    constructor(index: WasmIndex, deplete: boolean, abs_threshold: number, rel_threshold: number, decompress_r1: boolean, decompress_r2: boolean, compress_r1: boolean, compress_r2: boolean);
+    push_r1(chunk: Uint8Array): any;
+    push_r2(chunk: Uint8Array): any;
     stats(): any;
 }
 
@@ -23,14 +34,21 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly __wbg_wasmfiltersession_free: (a: number, b: number) => void;
+    readonly __wbg_filtersession_free: (a: number, b: number) => void;
+    readonly __wbg_pairedfiltersession_free: (a: number, b: number) => void;
     readonly __wbg_wasmindex_free: (a: number, b: number) => void;
-    readonly wasmfiltersession_finish: (a: number) => [number, number, number, number];
-    readonly wasmfiltersession_new: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
-    readonly wasmfiltersession_output_compressed: (a: number) => number;
-    readonly wasmfiltersession_pending_bytes: (a: number) => number;
-    readonly wasmfiltersession_push_chunk: (a: number, b: number, c: number) => [number, number, number, number];
-    readonly wasmfiltersession_stats: (a: number) => [number, number, number];
+    readonly filtersession_finish: (a: number) => [number, number, number, number];
+    readonly filtersession_new: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+    readonly filtersession_output_compressed: (a: number) => number;
+    readonly filtersession_pending_bytes: (a: number) => number;
+    readonly filtersession_push_chunk: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly filtersession_stats: (a: number) => [number, number, number];
+    readonly pairedfiltersession_finish_r1: (a: number) => [number, number, number];
+    readonly pairedfiltersession_finish_r2: (a: number) => [number, number, number];
+    readonly pairedfiltersession_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
+    readonly pairedfiltersession_push_r1: (a: number, b: number, c: number) => [number, number, number];
+    readonly pairedfiltersession_push_r2: (a: number, b: number, c: number) => [number, number, number];
+    readonly pairedfiltersession_stats: (a: number) => [number, number, number];
     readonly wasmindex_info: (a: number) => [number, number];
     readonly wasmindex_new: (a: number, b: number) => [number, number, number];
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

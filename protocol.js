@@ -17,7 +17,7 @@ export const STAGE = Object.freeze({
   FINALIZING: "finalizing",
 });
 
-// Deacon filter params (deplete mode, panhuman defaults); shared by worker and main thread so they stay in lockstep
+// Deacon filter params (deplete mode, panhuman defaults); shared by worker and main thread
 export const FILTER_DEFAULTS = Object.freeze({
   deplete: true,
   absThreshold: 2,
@@ -25,7 +25,7 @@ export const FILTER_DEFAULTS = Object.freeze({
   prefixLength: 0,
 });
 
-// `deacon` crate version the bundled WASM (pkg/) was built from; bump when regenerating pkg/
+// deacon crate version the bundled WASM was built from; bump when regenerating pkg/
 export const DEACON_VERSION = "deacon 0.15.0";
 
 export const UPDEACON_VERSION = "0.2.0";
