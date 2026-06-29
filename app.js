@@ -1,6 +1,6 @@
 // Updeacon client fa/fq dehosting & direct-to-s3 upload
 import { S3Client, Upload } from "./vendor/aws-sdk.js";
-import { MSG, FILTER_DEFAULTS, DEACON_VERSION, UPDEACON_VERSION } from "./protocol.js?v=20260628-073521";
+import { MSG, FILTER_DEFAULTS, DEACON_VERSION, UPDEACON_VERSION } from "./protocol.js?v=20260629-100515";
 import { SEQ_RE, groupRelativePaths, pairSequenceFiles } from "./pairing.js";
 
 // --- Fixed configuration -----------------------------------------------------
@@ -13,7 +13,7 @@ const BUILD_COMMIT = "dev";
 
 console.log(`updeacon ${UPDEACON_VERSION}: bucket "${BUCKET}" at ${ENDPOINT} (commit ${BUILD_COMMIT})`);
 
-const ASSET_VERSION = "20260628-073521";
+const ASSET_VERSION = "20260629-100515";
 
 const PART_SIZE = 8 * 1024 * 1024;
 const QUEUE_SIZE = 4;

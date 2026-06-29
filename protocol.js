@@ -23,6 +23,8 @@ export const FILTER_DEFAULTS = Object.freeze({
   absThreshold: 2,
   relThreshold: 0.05,
   prefixLength: 0,
+  rename: false,
+  outputFasta: false,
 });
 
 // deacon crate version the bundled WASM was built from; bump when regenerating pkg/

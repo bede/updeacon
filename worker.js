@@ -1,9 +1,9 @@
-import { MSG, FILTER_DEFAULTS } from "./protocol.js?v=20260628-073521";
+import { MSG, FILTER_DEFAULTS } from "./protocol.js?v=20260629-100515";
 
 // Off-main-thread WASM dehosting; pull-driven (one batch per MSG.PULL) so memory stays bounded
 let wasm = null;
 let index = null;
-const ASSET_VERSION = "20260628-073521";
+const ASSET_VERSION = "20260629-100515";
 const OUTPUT_BATCH_BYTES = 4 * 1024 * 1024; // 4 MiB
 
 // wasm-bindgen throws Result errors as plain strings with no .message; normalise so the reason survives
@@ -45,7 +45,9 @@ function startSingleFilter(file) {
     FILTER_DEFAULTS.absThreshold,
     FILTER_DEFAULTS.relThreshold,
     isGz, // decompress_input
-    isGz  // compress_output (match input so the filename stays valid)
+    isGz, // compress_output (match input so the filename stays valid)
+    FILTER_DEFAULTS.rename,
+    FILTER_DEFAULTS.outputFasta
   );
 
   active = {
@@ -79,10 +81,12 @@ function startPairedFilter(file1, file2) {
     FILTER_DEFAULTS.deplete,
     FILTER_DEFAULTS.absThreshold,
     FILTER_DEFAULTS.relThreshold,
-    r1Gz,
-    r2Gz,
-    r1Gz,
-    r2Gz
+    r1Gz, // decompress_r1
+    r2Gz, // decompress_r2
+    r1Gz, // compress_r1
+    r2Gz, // compress_r2
+    FILTER_DEFAULTS.rename,
+    FILTER_DEFAULTS.outputFasta
   );
 
   active = {

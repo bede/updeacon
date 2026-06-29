@@ -30,10 +30,12 @@ export class FilterSession {
      * @param {number} rel_threshold
      * @param {boolean} decompress_input
      * @param {boolean} compress_output
+     * @param {boolean} rename
+     * @param {boolean} output_fasta
      */
-    constructor(index, deplete, abs_threshold, rel_threshold, decompress_input, compress_output) {
+    constructor(index, deplete, abs_threshold, rel_threshold, decompress_input, compress_output, rename, output_fasta) {
         _assertClass(index, WasmIndex);
-        const ret = wasm.filtersession_new(index.__wbg_ptr, deplete, abs_threshold, rel_threshold, decompress_input, compress_output);
+        const ret = wasm.filtersession_new(index.__wbg_ptr, deplete, abs_threshold, rel_threshold, decompress_input, compress_output, rename, output_fasta);
         this.__wbg_ptr = ret >>> 0;
         FilterSessionFinalization.register(this, this.__wbg_ptr, this);
         return this;
@@ -120,10 +122,12 @@ export class PairedFilterSession {
      * @param {boolean} decompress_r2
      * @param {boolean} compress_r1
      * @param {boolean} compress_r2
+     * @param {boolean} rename
+     * @param {boolean} output_fasta
      */
-    constructor(index, deplete, abs_threshold, rel_threshold, decompress_r1, decompress_r2, compress_r1, compress_r2) {
+    constructor(index, deplete, abs_threshold, rel_threshold, decompress_r1, decompress_r2, compress_r1, compress_r2, rename, output_fasta) {
         _assertClass(index, WasmIndex);
-        const ret = wasm.pairedfiltersession_new(index.__wbg_ptr, deplete, abs_threshold, rel_threshold, decompress_r1, decompress_r2, compress_r1, compress_r2);
+        const ret = wasm.pairedfiltersession_new(index.__wbg_ptr, deplete, abs_threshold, rel_threshold, decompress_r1, decompress_r2, compress_r1, compress_r2, rename, output_fasta);
         this.__wbg_ptr = ret >>> 0;
         PairedFilterSessionFinalization.register(this, this.__wbg_ptr, this);
         return this;
