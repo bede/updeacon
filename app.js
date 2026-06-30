@@ -182,7 +182,7 @@ function setSelection(files) {
     const singles = selectedFiles.length - pairs;
     const parts = [];
     if (pairs) parts.push(`${pairs} pair${pairs === 1 ? "" : "s"}`);
-    if (singles) parts.push(`${singles} single${singles === 1 ? "" : "s"}`);
+    if (singles) parts.push(`${singles} unpaired`);
     dirSummary.textContent = `${seqs.length} sequence file${
       seqs.length === 1 ? "" : "s"
     } selected (${parts.join(", ")}) · ${humanBytes(totalBytes)}`;
