@@ -22,8 +22,9 @@
   .drop-zone .summary { font-weight: 600; color: #333; margin-top: 0.5rem; }
   .drop-zone .summary:empty { display: none; }
   #status { margin-bottom: 1rem; padding: 0.8rem; background: #fff; font-size: 0.9rem; min-height: 2.5rem; border: 1px solid #ddd; white-space: pre-line; line-height: 1.5; }
-  #status.error, #status.high-host { color: #e74c3c; }
-  #status.success { color: #4caf50; }
+  #status.pass { color: #4CAF50; }
+  #status.warn { color: #FFC107; }
+  #status.error, #status.high-host { color: #F44336; }
 </style>
 </head>
 <body>
@@ -31,7 +32,7 @@
 
 <div class="drop-zone" id="drop-zone">
   <input type="file" id="file-input" accept=".fastq,.fq,.fasta,.fa,.gz" multiple>
-  <div class="label">Drop a fasta/fastq[.gz] file or pair, or click to select.</div>
+  <div class="label">Drop a fasta/fastq[.gz] file or pair, or click to select</div>
   <div class="summary" id="drop-summary"></div>
 </div>
 
