@@ -24,14 +24,24 @@ function isSeqFilename(name) {
   return /\.(fastq|fq|fasta|fa)(\.gz)?$/i.test(name || "");
 }
 
-function startFilter(data) {
-  if (data.file1 && data.file2) {
-    return startPairedFilter(data.file1, data.file2);
-  }
-  return startSingleFilter(data.file);
+// Per-session threshold overrides from the FILTER payload; fall back to FILTER_DEFAULTS
+function resolveParams(data) {
+  return {
+    deplete: data.deplete ?? FILTER_DEFAULTS.deplete,
+    absThreshold: data.absThreshold ?? FILTER_DEFAULTS.absThreshold,
+    relThreshold: data.relThreshold ?? FILTER_DEFAULTS.relThreshold,
+  };
 }
 
-function startSingleFilter(file) {
+function startFilter(data) {
+  const params = resolveParams(data);
+  if (data.file1 && data.file2) {
+    return startPairedFilter(data.file1, data.file2, params);
+  }
+  return startSingleFilter(data.file, params);
+}
+
+function startSingleFilter(file, params) {
   if (!index) throw new Error("No index loaded");
   if (!file || typeof file.stream !== "function") throw new Error("Missing sequence file");
   if (!isSeqFilename(file.name)) {
@@ -41,9 +51,9 @@ function startSingleFilter(file) {
   const isGz = isGzipFilename(file.name);
   const session = new wasm.FilterSession(
     index,
-    FILTER_DEFAULTS.deplete,
-    FILTER_DEFAULTS.absThreshold,
-    FILTER_DEFAULTS.relThreshold,
+    params.deplete,
+    params.absThreshold,
+    params.relThreshold,
     isGz, // decompress_input
     isGz, // compress_output (match input so the filename stays valid)
     FILTER_DEFAULTS.rename,
@@ -65,7 +75,7 @@ function startSingleFilter(file) {
   };
 }
 
-function startPairedFilter(file1, file2) {
+function startPairedFilter(file1, file2, params) {
   if (!index) throw new Error("No index loaded");
   for (const file of [file1, file2]) {
     if (!file || typeof file.stream !== "function") throw new Error("Missing paired sequence file");
@@ -78,9 +88,9 @@ function startPairedFilter(file1, file2) {
   const r2Gz = isGzipFilename(file2.name);
   const session = new wasm.PairedFilterSession(
     index,
-    FILTER_DEFAULTS.deplete,
-    FILTER_DEFAULTS.absThreshold,
-    FILTER_DEFAULTS.relThreshold,
+    params.deplete,
+    params.absThreshold,
+    params.relThreshold,
     r1Gz, // decompress_r1
     r2Gz, // decompress_r2
     r1Gz, // compress_r1
