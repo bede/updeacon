@@ -27,7 +27,7 @@ export class WasmIndex {
     free(): void;
     [Symbol.dispose](): void;
     info(): string;
-    constructor(data: Uint8Array);
+    constructor(data: Uint8Array, complexity_threshold?: number | null);
 }
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
@@ -50,7 +50,7 @@ export interface InitOutput {
     readonly pairedfiltersession_push_r2: (a: number, b: number, c: number) => [number, number, number];
     readonly pairedfiltersession_stats: (a: number) => [number, number, number];
     readonly wasmindex_info: (a: number) => [number, number];
-    readonly wasmindex_new: (a: number, b: number) => [number, number, number];
+    readonly wasmindex_new: (a: number, b: number, c: number) => [number, number, number];
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_exn_store: (a: number) => void;
     readonly __externref_table_alloc: () => number;

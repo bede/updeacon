@@ -40,11 +40,11 @@ done
 # parses it — so a sync-time timestamp guarantees a new value each run.
 ROOT="$(dirname "$DEST_PKG")"
 VERSION="$(date +%Y%m%d-%H%M%S)"
-for f in app.js worker.js detect.js; do
+for f in app.js worker.js check.js; do
   perl -i -pe "s/(ASSET_VERSION\s*=\s*\")[^\"]*(\")/\${1}${VERSION}\${2}/g; \
                s/(protocol\.js\?v=)[^\"]*/\${1}${VERSION}/g" "$ROOT/$f"
 done
-echo "  stamped cache-bust version $VERSION into app.js, worker.js and detect.js"
+echo "  stamped cache-bust version $VERSION into app.js, worker.js and check.js"
 
 SRC_HASH="$(git -C "$SRC_REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo "Synced Deacon WASM from $SRC_REPO (deacon @ $SRC_HASH) into $DEST_PKG"

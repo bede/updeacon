@@ -1,8 +1,8 @@
 // updeacon-check: in-browser host-content check
-import { MSG, DETECT_DEFAULTS } from "./protocol.js?v=20260702-094702";
+import { MSG, DETECT_DEFAULTS } from "./protocol.js?v=20260702-141439";
 import { SEQ_RE, pairSequenceFiles } from "./pairing.js";
 
-const ASSET_VERSION = "20260702-094702";
+const ASSET_VERSION = "20260702-141439";
 
 const INDEX_URL =
   "https://objectstorage.uk-london-1.oraclecloud.com/n/lrbvkel2wjot/b/human-genome-bucket/o/deacon/3/panhuman-1.k31w61c99.pidx";
