@@ -142,11 +142,21 @@ function appendPairedOutput(out) {
 }
 
 function postProgress() {
+  // Running read counts for the live host tier; mid-stream stats() may be unsupported
+  let readsIn = 0;
+  let readsOut = 0;
+  try {
+    const s = active.session.stats();
+    readsIn = Number(s?.readsIn || 0);
+    readsOut = Number(s?.readsOut || 0);
+  } catch (_) {}
   self.postMessage({
     type: MSG.PROGRESS,
     bytesProcessed: active.processedBytes,
     bytesTotal: active.totalBytes,
     progressCompressed: active.isGz,
+    readsIn,
+    readsOut,
   });
 }
 
