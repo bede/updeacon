@@ -1,24 +1,24 @@
 # updeacon
 
-A fully client-side web tool that **dehosts** `fastq`/`fasta` files (optionally
-`.gz`) with [Deacon](https://github.com/bede/deacon) and uploads the cleaned reads
-to S3-compatible object storage. Human reads are removed in the browser, so
+A client-side web tool that dehosts `fastq`/`fasta` files (optionally `.gz`) with
+[Deacon](https://github.com/bede/deacon) and uploads the cleaned reads to
+S3-compatible object storage. Human reads are removed in the browser, so
 contaminant sequences never leave the machine. Files land in a timestamped folder
 with their original names and directory structure preserved. Output is always
-gzip-compressed, so an uncompressed input is uploaded with a `.gz` suffix added.
+gzip-compressed; an uncompressed input is uploaded with a `.gz` suffix added.
 
 Filtering runs as WebAssembly ([`pkg/`](pkg/)) inside a Web Worker
-([`worker.js`](worker.js)), so the UI stays responsive. An index is required; the
+([`worker.js`](worker.js)), keeping the UI responsive. An index is required. The
 compact [panhuman-1](https://objectstorage.uk-london-1.oraclecloud.com/n/lrbvkel2wjot/b/human-genome-bucket/o/deacon/3/panhuman-1.k31w21.pidx)
 index is downloaded on first use and cached in IndexedDB.
 
 ## Two ways to upload
 
-**With a presigned link** (recommended for collaborators). Someone with bucket
-access sends a URL. Opening it authorises uploads into one prefix, for up to 7
-days — no credentials to distribute, type, or leak.
+**Presigned link** (recommended for collaborators). Someone with bucket access
+sends a URL. Opening it authorises uploads into one prefix for up to 7 days, with
+no credentials to distribute or leak.
 
-**With S3 credentials.** Open the app with no link and enter an access key ID and
+**S3 credentials.** Open the app with no link and enter an access key ID and
 secret access key. Uploads stream directly into a multipart upload, so there is no
 per-file size limit.
 
@@ -42,7 +42,7 @@ https://bede.github.io/updeacon-s3/#u=eyJ2IjoxLCJlbmRwb2ludCI6...
 Send that URL to whoever is uploading. The `letter-digit-letter-digit` suffix
 avoids collisions between links; it is not a secret.
 
-The link is **reusable** until it expires. Each upload creates its own timestamped
+The link is reusable until it expires. Each upload creates its own timestamped
 directory inside the prefix, so repeat uploads never overwrite one another:
 
 ```
@@ -55,43 +55,44 @@ inrb-batch3-k7q2/
 └── 2026-07-11T09-02-13Z--flowcell2/
 ```
 
-`_MANIFEST.txt` is written **last** and lists every object uploaded, so its
-presence means the upload completed in full. `_CLIENT.json` is written **first**,
-before any filtering: it doubles as a check that the link can actually write, and
-records who uploaded what (updeacon version and commit, deacon version, index,
-browser, OS, timezone, and the number and size of files intended). A directory
-with a `_CLIENT.json` but no `_MANIFEST.txt` died partway.
+`_MANIFEST.txt` is written last and lists every object uploaded, so its presence
+means the upload completed in full. `_CLIENT.json` is written first, before any
+filtering: it confirms the link can write, and records who uploaded what (updeacon
+version and commit, deacon version, index, browser, OS, timezone, and the number
+and size of files intended). A directory with a `_CLIENT.json` but no
+`_MANIFEST.txt` was interrupted before it finished.
 
-Useful flags: `--days N` (≤ 7), `--max-bytes N`, `--bucket`, `--endpoint`,
+Useful flags: `--days N` (max 7), `--max-bytes N`, `--bucket`, `--endpoint`,
 `--base-url`, `--region`. `--self-test` checks the signing implementation against
 AWS's published SigV4 test vectors.
 
 ### How it works, and what it grants
 
 A presigned `PUT` URL signs one object key, which is useless when uploading many
-files whose names aren't known in advance. This instead signs an S3 **POST
-policy** containing `["starts-with", "$key", "inrb-batch3-k7q2/"]` — one signature
+files whose names aren't known in advance. This instead signs an S3 POST policy
+containing `["starts-with", "$key", "inrb-batch3-k7q2/"]`: one signature
 authorising any key under that prefix.
 
 The object store enforces that. A leaked link can write anywhere under its own
-prefix and nothing else: it cannot list, read, or delete, each object is capped
-(5 GB by default), and it stops working at expiry. It *can* overwrite objects
-within its own prefix, so enable bucket versioning if that matters. Rotating the
-signing key invalidates every outstanding link at once.
+prefix and nothing else. It cannot list, read, or delete, each object is capped
+(5 GB by default), and it stops working at expiry. It can overwrite objects within
+its own prefix, so enable bucket versioning if that matters. Rotating the signing
+key invalidates every outstanding link at once.
 
-The signed policy travels in the URL **fragment**, which browsers never send to
-the web server — it stays out of GitHub Pages logs and `Referer` headers. It is
+The signed policy travels in the URL fragment, which browsers never send to the
+web server, so it stays out of GitHub Pages logs and `Referer` headers. It is
 still a bearer credential: share it like a password.
 
 Sign with long-lived IAM user keys. SigV4 caps signature validity at 7 days, and
 temporary credentials would invalidate the link the moment the session expires;
 the script refuses them unless you pass `--allow-session-token`.
 
-### Why linked uploads are capped at 5 GB per file
+## Limitations
 
-`POST Object` is a single-shot upload with no multipart support and a hard 5 GB
-object limit. Credential-mode uploads stream into a multipart upload and have no
-such cap. In link mode the filtered output is spooled to an Origin Private File
+Linked uploads are capped at 5 GB per file. `POST Object` is a single-shot upload
+with no multipart support and a hard 5 GB object limit, so a link cannot post
+anything larger. Credential-mode uploads stream into a multipart upload and have
+no such cap. In link mode the filtered output is spooled to an Origin Private File
 System temp file before being posted, so memory stays bounded either way. Output
 is never larger than input (depletion only removes reads, and output compression
 matches input), so an input file under 5 GB always fits.
@@ -108,12 +109,12 @@ Defaults live at the top of [`app.js`](app.js) and
 | Region      | `us-east-1` (dummy; RGW ignores it) |
 | Addressing  | path-style (`forcePathStyle: true`) |
 
-## Bucket CORS — required
+## Bucket CORS (required)
 
 A browser cannot upload unless the bucket allows this page's origin and exposes
 the `ETag` header. Multipart uploads read each part's ETag; presigned POSTs carry
-an upload-progress listener, which makes them non-simple requests and so triggers
-a CORS preflight that the bucket must answer. Apply [`cors.json`](cors.json):
+an upload-progress listener, which makes them non-simple requests and triggers a
+CORS preflight that the bucket must answer. Apply [`cors.json`](cors.json):
 
 ```sh
 sh set-cors.sh
@@ -121,9 +122,9 @@ sh set-cors.sh
 
 Tighten `AllowedOrigins` from `*` to the exact serving origin in production.
 
-The index host must also allow cross-origin `GET` (and expose `Content-Length`
-for an accurate progress bar). If it doesn't, the download fails and the index
-panel becomes a drop target for a local `.idx`/`.pidx`.
+The index host must also allow cross-origin `GET`, and expose `Content-Length` for
+an accurate progress bar. If it doesn't, the download fails and the index panel
+becomes a drop target for a local `.idx`/`.pidx`.
 
 ## Running locally
 
@@ -145,11 +146,4 @@ Tests: `node --test "tests/*.test.mjs"` and `scripts/mint-upload-link.py --self-
 ## Deploying
 
 `scripts/deploy.sh` copies both apps into the `bede.github.io` Jekyll site and
-pushes. See [`AGENTS.md`](AGENTS.md) for repository internals.
-
-## Security note
-
-In credential mode, keys are entered in the browser and sent only to the
-configured endpoint over HTTPS. The secret access key is never persisted. Even so,
-pasting long-lived secret keys into a web form is risky — prefer a presigned link,
-which grants write-only access to a single prefix for a bounded time.
+pushes.
