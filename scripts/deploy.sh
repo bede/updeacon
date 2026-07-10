@@ -19,6 +19,7 @@ FILES=(
   index.html
   app.js
   pairing.js
+  presign.js
   worker.js
   protocol.js
   vendor/aws-sdk.js
