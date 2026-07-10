@@ -1,5 +1,5 @@
 // Updeacon client fa/fq dehosting & direct-to-s3 upload
-import { MSG, FILTER_DEFAULTS, DEACON_VERSION, UPDEACON_VERSION } from "./protocol.js?v=20260710-163000";
+import { MSG, FILTER_DEFAULTS, DEACON_VERSION, UPDEACON_VERSION } from "./protocol.js?v=20260710-183617";
 import { SEQ_RE, describeGroups, groupRelativePaths, pairSequenceFiles } from "./pairing.js";
 import {
   parseUploadLink,
@@ -10,7 +10,7 @@ import {
   spoolName,
   releaseSpool,
   purgeStaleSpools,
-} from "./presign.js?v=20260710-163000";
+} from "./presign.js?v=20260710-183617";
 
 // --- Fixed configuration -----------------------------------------------------
 // Ceph RADOS Gateway, not AWS: dummy region, forcePathStyle required (no vhost buckets)
@@ -20,7 +20,7 @@ const REGION = "us-east-1";
 
 const BUILD_COMMIT = "dev";
 
-const ASSET_VERSION = "20260710-163000";
+const ASSET_VERSION = "20260710-183617";
 
 const PART_SIZE = 8 * 1024 * 1024;
 const QUEUE_SIZE = 4;
