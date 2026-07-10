@@ -4,7 +4,8 @@ A fully client-side web tool that **dehosts** `fastq`/`fasta` files (optionally
 `.gz`) with [Deacon](https://github.com/bede/deacon) and uploads the cleaned reads
 to S3-compatible object storage. Human reads are removed in the browser, so
 contaminant sequences never leave the machine. Files land in a timestamped folder
-with their original names and directory structure preserved.
+with their original names and directory structure preserved. Output is always
+gzip-compressed, so an uncompressed input is uploaded with a `.gz` suffix added.
 
 Filtering runs as WebAssembly ([`pkg/`](pkg/)) inside a Web Worker
 ([`worker.js`](worker.js)), so the UI stays responsive. An index is required; the
