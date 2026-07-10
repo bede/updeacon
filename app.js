@@ -4,6 +4,7 @@ import { SEQ_RE, groupRelativePaths, pairSequenceFiles } from "./pairing.js";
 import {
   parseUploadLink,
   describeExpiry,
+  clientEnvironment,
   postObject,
   spoolToFile,
   spoolName,
@@ -182,7 +183,7 @@ function renderLinkBanner() {
   note.className = "link-note";
   note.textContent = expired
     ? `This upload link expired ${text} ago (${humanDate(LINK.expiresAt)}). Ask whoever sent it for a new one.`
-    : `Authorised upload — no credentials needed. Link expires in ${text} (${humanDate(LINK.expiresAt)}).`;
+    : `Preauthorised upload URL. Link expires in ${text} (${humanDate(LINK.expiresAt)}).`;
 
   linkBannerEl.append(dest, note);
 }
@@ -994,6 +995,22 @@ async function filterOnly() {
 // Both expose preflight/uploadGroup/putSmall, so uploadAll() is mode-agnostic.
 // Credentials stream a group into a multipart upload; a POST needs it whole.
 
+// Written before filtering, so it records intent rather than outcome
+function buildClientRecord() {
+  return {
+    started: new Date().toISOString(),
+    updeacon_version: UPDEACON_VERSION,
+    updeacon_commit: BUILD_COMMIT,
+    deacon_version: DEACON_VERSION,
+    index: indexFilename,
+    k: indexK,
+    w: indexW,
+    groups: selectedFiles.length,
+    input_bytes: totalBytes,
+    ...clientEnvironment(),
+  };
+}
+
 // RGW returns the CORS header on an anonymous 403, so this resolves iff CORS works
 async function checkReachable(endpoint, bucket) {
   setStatus("Checking connection …");
@@ -1086,13 +1103,13 @@ function makeLinkUploader(link) {
         throw err;
       }
       await checkReachable(link.endpoint, link.bucket);
-      // Fail now, not after an hour of filtering; also marks an abandoned run
+      // Fail now, not after an hour of filtering; also records upload provenance
       setStatus("Checking upload link …");
       await postObject({
         link,
-        key: `${keyBase}/_UPLOAD_STARTED.txt`,
-        body: new Blob([`${new Date().toISOString()}\n`], { type: "text/plain" }),
-        contentType: "text/plain",
+        key: `${keyBase}/_CLIENT.json`,
+        body: new Blob([JSON.stringify(buildClientRecord(), null, 2)], { type: "application/json" }),
+        contentType: "application/json",
       });
     },
     putSmall: (key, blob, contentType) => postObject({ link, key, body: blob, contentType }),

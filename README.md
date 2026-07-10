@@ -38,8 +38,8 @@ max size 5.0 GB per file
 https://bede.github.io/updeacon-s3/#u=eyJ2IjoxLCJlbmRwb2ludCI6...
 ```
 
-Send that URL to whoever is uploading. The four random characters avoid
-collisions between links; they are not a secret.
+Send that URL to whoever is uploading. The `letter-digit-letter-digit` suffix
+avoids collisions between links; it is not a secret.
 
 The link is **reusable** until it expires. Each upload creates its own timestamped
 directory inside the prefix, so repeat uploads never overwrite one another:
@@ -49,14 +49,17 @@ inrb-batch3-k7q2/
 ├── 2026-07-09T14-30-00Z--flowcell1/
 │   ├── sample_R1.fastq.gz
 │   ├── sample_R1.fastq.gz.deacon.json
-│   ├── _UPLOAD_STARTED.txt
+│   ├── _CLIENT.json
 │   └── _MANIFEST.txt
 └── 2026-07-11T09-02-13Z--flowcell2/
 ```
 
 `_MANIFEST.txt` is written **last** and lists every object uploaded, so its
-presence means the upload completed in full. `_UPLOAD_STARTED.txt` is written
-first: a directory with one and not the other died partway.
+presence means the upload completed in full. `_CLIENT.json` is written **first**,
+before any filtering: it doubles as a check that the link can actually write, and
+records who uploaded what (updeacon version and commit, deacon version, index,
+browser, OS, timezone, and the number and size of files intended). A directory
+with a `_CLIENT.json` but no `_MANIFEST.txt` died partway.
 
 Useful flags: `--days N` (≤ 7), `--max-bytes N`, `--bucket`, `--endpoint`,
 `--base-url`, `--region`. `--self-test` checks the signing implementation against

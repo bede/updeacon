@@ -50,7 +50,8 @@
   .link-banner.expired .link-note { color: #e74c3c; }
   .index-status { border: 1px solid #ddd; background: #fff; padding: 1rem; margin-bottom: 1rem; transition: all 0.2s; text-align: center; }
   .index-status input { display: none; }
-  .index-status .filename { color: #333; }
+  /* Matches .link-banner .link-dest */
+  .index-status .filename { font-family: var(--mono); font-size: 0.9rem; color: #333; word-break: break-all; }
   .index-status .filename:empty { display: none; }
   .index-status progress { width: 100%; margin-top: 0.5rem; }
   .index-status .idx-info { font-size: 0.8rem; color: #888; margin-top: 0.3rem; }
@@ -114,9 +115,8 @@
   <ol id="usage-link" hidden>
     <li>Press 'Download index', else drag &amp; drop a local copy of <a href="https://objectstorage.uk-london-1.oraclecloud.com/n/lrbvkel2wjot/b/human-genome-bucket/o/deacon/3/panhuman-1.k31w21.pidx">panhuman-1</a>.</li>
     <li>Drag &amp; drop fasta/fastq files you wish to upload, or a directory containing them. Illumina R1/R2 files are paired automatically.</li>
-    <li>Choose a descriptive name for your upload. This link already authorises it, so no credentials are needed.</li>
-    <li>Press either 'Filter &amp; upload' or 'Filter only', and keep the browser open until completion.</li>
-    <li>Reuse this link until it expires; each upload lands in its own timestamped folder.</li>
+    <li>Choose a name for your upload.</li>
+    <li>Press either 'Filter &amp; upload' or 'Filter only', and keep the browser open until completion. You can reuse your magic link until it expires: each upload lands in its own timestamped folder.</li>
   </ol>
   <ol id="usage-creds">
     <li>Press 'Download index', else drag & drop a local copy of <a href="https://objectstorage.uk-london-1.oraclecloud.com/n/lrbvkel2wjot/b/human-genome-bucket/o/deacon/3/panhuman-1.k31w21.pidx">panhuman-1</a>.</li>
