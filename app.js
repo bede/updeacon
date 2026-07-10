@@ -1,6 +1,6 @@
 // Updeacon client fa/fq dehosting & direct-to-s3 upload
 import { MSG, FILTER_DEFAULTS, DEACON_VERSION, UPDEACON_VERSION } from "./protocol.js?v=20260708-100430";
-import { SEQ_RE, groupRelativePaths, pairSequenceFiles } from "./pairing.js";
+import { SEQ_RE, describeGroups, groupRelativePaths, pairSequenceFiles } from "./pairing.js";
 import {
   parseUploadLink,
   describeExpiry,
@@ -149,6 +149,19 @@ function credentialsFilled() {
   );
 }
 
+// What the user still has to do, given index, selection and mode
+function readyStatus() {
+  if (!indexLoaded) return "";
+  if (!selectedFiles.length) {
+    return LINK
+      ? "Index loaded. Select sequences to filter and upload"
+      : "Index loaded. Select sequences and enter S3 credentials";
+  }
+  if (LINK && linkExpired) return "";
+  if (!LINK && !credentialsFilled()) return "Enter S3 credentials to upload, or press 'Filter only'";
+  return "Press either 'Filter & upload' or 'Filter only' to begin";
+}
+
 function updateUploadEnabled() {
   if (!indexLoaded || uploadCompleted) {
     setButtonDisabled(uploadBtn, true);
@@ -177,13 +190,13 @@ function renderLinkBanner() {
 
   const dest = document.createElement("div");
   dest.className = "link-dest";
-  dest.textContent = `${LINK.bucket}/${LINK.prefix}`;
+  dest.textContent = `${LINK.bucket}/${LINK.prefix.replace(/\/$/, "")}`;
 
   const note = document.createElement("div");
   note.className = "link-note";
   note.textContent = expired
-    ? `This upload link expired ${text} ago (${humanDate(LINK.expiresAt)}). Ask whoever sent it for a new one.`
-    : `Preauthorised upload URL. Link expires in ${text} (${humanDate(LINK.expiresAt)}).`;
+    ? `This magic link expired ${text} ago (${humanDate(LINK.expiresAt)}). Ask whoever sent it for a new one.`
+    : `Reusable magic link, expires in ${text} (${humanDate(LINK.expiresAt)})`;
 
   linkBannerEl.append(dest, note);
 }
@@ -287,12 +300,12 @@ function setSelection(files) {
   if (oversizeFiles.length) {
     const names = oversizeFiles.map((f) => `${f.name} (${humanBytes(f.size)})`).join(", ");
     setStatus(
-      `Too large for a presigned upload link, which is capped at ${humanBytes(LINK.maxBytes)} ` +
+      `Too large for a magic link, which is capped at ${humanBytes(LINK.maxBytes)} ` +
         `per file: ${names}. Remove these files, or upload them with S3 credentials.`,
       "error"
     );
   } else {
-    setStatus("");
+    setStatus(readyStatus());
   }
   progressWrap.style.display = "none";
   renderFileList();
@@ -350,11 +363,7 @@ worker.onmessage = (e) => {
       const kw = /k=(\d+),\s*w=(\d+)/.exec(m.info || "");
       indexK = kw ? Number(kw[1]) : null;
       indexW = kw ? Number(kw[2]) : null;
-      setStatus(
-        LINK
-          ? "Index loaded. Select sequences to filter and upload"
-          : "Index loaded. Select sequences and enter S3 credentials"
-      );
+      setStatus(readyStatus());
       updateUploadEnabled();
       break;
     }
@@ -855,7 +864,11 @@ function readAllEntries(reader) {
 
 // --- Upload ------------------------------------------------------------------
 [bucketEl, serverEl, accessKeyEl, secretKeyEl].forEach((el) =>
-  el.addEventListener("input", updateUploadEnabled)
+  el.addEventListener("input", () => {
+    updateUploadEnabled();
+    // Don't overwrite an oversize/pairing error, or a live run's progress
+    if (!isUploading && !uploadCompleted && !oversizeFiles.length) setStatus(readyStatus());
+  })
 );
 
 // Tick the greyed "<timestamp>--" prefix; real value captured at upload start. Once committed,
@@ -974,8 +987,9 @@ async function filterOnly() {
     }
 
     dehostProgress.value = 100;
-    dehostLabel.textContent = `Processed ${humanBases(totalBasesIn)} of input across ${completed} group${completed === 1 ? "" : "s"}.`;
-    setStatus(`Filtering complete: ${completed} pair${completed === 1 ? "" : "s"} downloaded`, "success");
+    const done = describeGroups(groups.slice(0, completed));
+    dehostLabel.textContent = `Processed ${humanBases(totalBasesIn)} of input across ${done}.`;
+    setStatus(`Filtering complete: ${done} downloaded`, "success");
   } catch (err) {
     const idx = completed; // the file that failed
     if (rows[idx]) {
@@ -995,16 +1009,12 @@ async function filterOnly() {
 // Both expose preflight/uploadGroup/putSmall, so uploadAll() is mode-agnostic.
 // Credentials stream a group into a multipart upload; a POST needs it whole.
 
-// Written before filtering, so it records intent rather than outcome
+// Written before filtering, so it records intent rather than outcome. Filter params
+// live in the per-file .deacon.json; don't repeat them here.
 function buildClientRecord() {
   return {
     started: new Date().toISOString(),
-    updeacon_version: UPDEACON_VERSION,
     updeacon_commit: BUILD_COMMIT,
-    deacon_version: DEACON_VERSION,
-    index: indexFilename,
-    k: indexK,
-    w: indexW,
     groups: selectedFiles.length,
     input_bytes: totalBytes,
     ...clientEnvironment(),
@@ -1088,7 +1098,7 @@ function makeLinkUploader(link) {
     if (!link.maxBytes || file.size <= link.maxBytes) return;
     const err = new Error(
       `${key.split("/").pop()} is ${humanBytes(file.size)} after filtering, above the ` +
-        `${humanBytes(link.maxBytes)} per-file limit for presigned upload links.`
+        `${humanBytes(link.maxBytes)} per-file limit for magic links.`
     );
     err.updeaconCause = "size";
     throw err;
@@ -1098,13 +1108,13 @@ function makeLinkUploader(link) {
     async preflight(keyBase) {
       const { expired, text } = describeExpiry(link.expiresAt);
       if (expired) {
-        const err = new Error(`This upload link expired ${text} ago.`);
+        const err = new Error(`This magic link expired ${text} ago.`);
         err.updeaconCause = "link";
         throw err;
       }
       await checkReachable(link.endpoint, link.bucket);
       // Fail now, not after an hour of filtering; also records upload provenance
-      setStatus("Checking upload link …");
+      setStatus("Checking magic link …");
       await postObject({
         link,
         key: `${keyBase}/_CLIENT.json`,
@@ -1275,7 +1285,8 @@ async function uploadAll() {
     }
 
     dehostProgress.value = 100;
-    dehostLabel.textContent = `Processed ${humanBases(totalBasesIn)} of input across ${completed} group${completed === 1 ? "" : "s"}.`;
+    dehostLabel.textContent =
+      `Processed ${humanBases(totalBasesIn)} of input across ${describeGroups(items.slice(0, completed))}.`;
 
     // Write the manifest last, signalling upload completion
     setStatus("Finalising (writing manifest) …");
@@ -1360,7 +1371,7 @@ function formatError(err) {
   }
   if (err?.updeaconCause === "link") {
     return (
-      `${msg}\nThis upload link is no longer valid. Ask whoever sent it for a new one.`
+      `${msg}\nThis magic link is no longer valid. Ask whoever sent it for a new one.`
     );
   }
   if (err?.updeaconCause === "cors") {

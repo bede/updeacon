@@ -11,6 +11,10 @@ DEST="$PAGES_ROOT/updeacon-s3"
 SAPIO_DEST="$PAGES_ROOT/sapiometer"
 
 SOURCE_HASH="$(git -C "$SRC" rev-parse --short HEAD)"
+# We copy the working tree, not HEAD, so don't label uncommitted code with a clean hash
+if [[ -n "$(git -C "$SRC" status --porcelain)" ]]; then
+  SOURCE_HASH="$SOURCE_HASH-dirty"
+fi
 
 # Files deployed into updeacon-s3/ (paths relative to both SRC and DEST). This is
 # the single source of truth: files copied, staged, and pruned all derive from it,

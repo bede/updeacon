@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const source = await readFile(resolve(here, "../pairing.js"), "utf8");
 const pairing = await import(`data:text/javascript,${encodeURIComponent(source)}`);
-const { pairSequenceFiles } = pairing;
+const { pairSequenceFiles, describeGroups } = pairing;
 
 function file(path, size = 1) {
   const name = path.split("/").pop();
@@ -69,4 +69,26 @@ test("rejects duplicate mates", () => {
       ]),
     /Ambiguous or incomplete pair/
   );
+});
+
+test("describeGroups names pairs and files, never conflating them", () => {
+  const pair = { kind: "paired" };
+  const single = { kind: "single" };
+  assert.equal(describeGroups([pair]), "1 pair");
+  assert.equal(describeGroups([pair, pair]), "2 pairs");
+  assert.equal(describeGroups([single]), "1 file");
+  // The old label called three unpaired files "3 pairs"
+  assert.equal(describeGroups([single, single, single]), "3 files");
+  assert.equal(describeGroups([pair, single, single]), "1 pair and 2 files");
+  assert.equal(describeGroups([pair, pair, single]), "2 pairs and 1 file");
+  assert.equal(describeGroups([]), "0 files");
+});
+
+test("describeGroups counts real groups from pairSequenceFiles", () => {
+  const groups = pairSequenceFiles([
+    file("run/a_R1.fastq.gz"),
+    file("run/a_R2.fastq.gz"),
+    file("run/lonely.fastq"),
+  ]);
+  assert.equal(describeGroups(groups), "1 pair and 1 file");
 });
