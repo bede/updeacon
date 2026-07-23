@@ -287,7 +287,7 @@ function setSelection(files) {
   if (seqs.length === 0) {
     dirZone.classList.remove("loaded");
     dirSummary.textContent = files.length
-      ? "No fastq/fasta files found in that folder"
+      ? "No fastq/fasta files found in selection"
       : "";
   } else {
     dirZone.classList.add("loaded");
