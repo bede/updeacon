@@ -9,7 +9,7 @@ gzip-compressed; an uncompressed input is uploaded with a `.gz` suffix added.
 
 Filtering runs as WebAssembly ([`pkg/`](pkg/)) inside a Web Worker
 ([`worker.js`](worker.js)), keeping the UI responsive. An index is required. The
-compact [panhuman-1](https://objectstorage.uk-london-1.oraclecloud.com/n/lrbvkel2wjot/b/human-genome-bucket/o/deacon/3/panhuman-1.k31w21.pidx)
+compact [panhuman-1](https://objectstorage.uk-london-1.oraclecloud.com/n/lrbvkel2wjot/b/human-genome-bucket/o/deacon/3/panhuman-1.k31w25c9b16.pidx)
 index is downloaded on first use and cached in IndexedDB.
 
 ## Two ways to upload
