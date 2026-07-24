@@ -41,6 +41,20 @@ test("pairs simple trailing _1/_2 filenames", () => {
   assert.equal(groups[0].kind, "paired");
 });
 
+test("does not pair _1/_2 when other numbered chunks share the prefix (ONT)", () => {
+  const groups = pairSequenceFiles([
+    file("run/barcode02_0.fastq"),
+    file("run/barcode02_1.fastq"),
+    file("run/barcode02_2.fastq"),
+    file("run/barcode02_3.fastq"),
+    file("run/barcode02_10.fastq"),
+  ]);
+  assert.deepEqual(
+    groups.map((g) => g.kind),
+    ["single", "single", "single", "single", "single"]
+  );
+});
+
 test("does not pair files across directories", () => {
   assert.throws(
     () =>
