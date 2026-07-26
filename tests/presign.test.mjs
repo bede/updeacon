@@ -7,7 +7,15 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const source = await readFile(resolve(here, "../presign.js"), "utf8");
 const presign = await import(`data:text/javascript,${encodeURIComponent(source)}`);
-const { parseUploadLink, describeExpiry, clientEnvironment } = presign;
+const {
+  parseUploadLink,
+  describeExpiry,
+  clientEnvironment,
+  retryDelayMs,
+  isRetryableUploadError,
+  postObjectWithRetry,
+  postObject,
+} = presign;
 
 const b64 = (obj) => Buffer.from(JSON.stringify(obj)).toString("base64");
 const b64url = (obj) => Buffer.from(JSON.stringify(obj)).toString("base64url");
@@ -142,4 +150,223 @@ test("clientEnvironment reports provenance and nothing more", () => {
   ]);
   assert.ok(Array.isArray(env.languages));
   assert.ok(typeof env.timezone === "string" && env.timezone.length > 0);
+});
+
+test("retryDelayMs backs off exponentially and caps at one minute", () => {
+  assert.equal(retryDelayMs(1), 1000);
+  assert.equal(retryDelayMs(2), 2000);
+  assert.equal(retryDelayMs(6), 32000);
+  assert.equal(retryDelayMs(7), 60000);
+  assert.equal(retryDelayMs(20), 60000);
+});
+
+test("isRetryableUploadError only retries transient upload failures", () => {
+  const network = new Error("offline");
+  network.updeaconCause = "network";
+  assert.equal(isRetryableUploadError(network), true);
+
+  for (const status of [408, 429, 500, 503]) {
+    const err = new Error(`HTTP ${status}`);
+    err.status = status;
+    assert.equal(isRetryableUploadError(err), true, String(status));
+  }
+
+  for (const cause of ["link", "size", "cors"]) {
+    const err = new Error(cause);
+    err.updeaconCause = cause;
+    assert.equal(isRetryableUploadError(err), false, cause);
+  }
+
+  const badRequest = new Error("bad request");
+  badRequest.status = 400;
+  assert.equal(isRetryableUploadError(badRequest), false);
+});
+
+test("postObjectWithRetry retries transient errors until the POST succeeds", async () => {
+  const attempts = [];
+  const sleeps = [];
+  const link = { expiresAt: Date.parse("2026-07-09T00:10:00Z") };
+  const network = new Error("offline");
+  network.updeaconCause = "network";
+
+  await postObjectWithRetry({
+    link,
+    key: "prefix/file.fastq.gz",
+    body: new Blob(["x"]),
+    nowFn: () => Date.parse("2026-07-09T00:00:00Z"),
+    sleepFn: async (ms) => sleeps.push(ms),
+    postOnce: async () => {
+      attempts.push(1);
+      if (attempts.length < 3) throw network;
+    },
+  });
+
+  assert.equal(attempts.length, 3);
+  assert.deepEqual(sleeps, [1000, 2000]);
+});
+
+test("postObjectWithRetry stops retrying when the magic link expires", async () => {
+  let now = Date.parse("2026-07-09T00:00:00Z");
+  const sleeps = [];
+  const link = { expiresAt: now + 2500 };
+  const network = new Error("offline");
+  network.updeaconCause = "network";
+
+  await assert.rejects(
+    () =>
+      postObjectWithRetry({
+        link,
+        key: "prefix/file.fastq.gz",
+        body: new Blob(["x"]),
+        nowFn: () => now,
+        sleepFn: async (ms) => {
+          sleeps.push(ms);
+          now += ms;
+        },
+        postOnce: async () => {
+          throw network;
+        },
+      }),
+    /magic link expired/
+  );
+
+  assert.deepEqual(sleeps, [1000, 1500]);
+});
+
+test("postObjectWithRetry waits for online after an offline upload failure", async () => {
+  const originalNavigator = globalThis.navigator;
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { onLine: true },
+  });
+
+  const events = [];
+  const attempts = [];
+  const link = { expiresAt: Date.parse("2026-07-09T00:10:00Z") };
+  const offline = new Error("Connection lost during upload.");
+  offline.updeaconCause = "network";
+  offline.offline = true;
+
+  try {
+    await postObjectWithRetry({
+      link,
+      key: "prefix/file.fastq.gz",
+      body: new Blob(["x"]),
+      nowFn: () => Date.parse("2026-07-09T00:00:00Z"),
+      sleepFn: () => new Promise(() => {}),
+      waitOnlineFn: async () => {
+        events.push("wait-online");
+        globalThis.navigator.onLine = true;
+      },
+      onRetry: (info) => events.push(info.waitingOnline ? "waiting-online" : info.resumed ? "resumed" : "backoff"),
+      postOnce: async () => {
+        attempts.push(1);
+        if (attempts.length === 1) {
+          globalThis.navigator.onLine = false;
+          throw offline;
+        }
+      },
+    });
+  } finally {
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: originalNavigator,
+    });
+  }
+
+  assert.equal(attempts.length, 2);
+  assert.deepEqual(events, ["waiting-online", "wait-online", "resumed"]);
+});
+
+test("postObjectWithRetry does not start a POST while already offline", async () => {
+  const originalNavigator = globalThis.navigator;
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { onLine: false },
+  });
+
+  const events = [];
+  const attempts = [];
+  const link = { expiresAt: Date.parse("2026-07-09T00:10:00Z") };
+
+  try {
+    await postObjectWithRetry({
+      link,
+      key: "prefix/file.fastq.gz",
+      body: new Blob(["x"]),
+      nowFn: () => Date.parse("2026-07-09T00:00:00Z"),
+      sleepFn: () => new Promise(() => {}),
+      waitOnlineFn: async () => {
+        events.push(`wait-before-${attempts.length}`);
+        globalThis.navigator.onLine = true;
+      },
+      onRetry: (info) => events.push(info.waitingOnline ? "waiting-online" : info.resumed ? "resumed" : "backoff"),
+      postOnce: async () => {
+        attempts.push(1);
+      },
+    });
+  } finally {
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: originalNavigator,
+    });
+  }
+
+  assert.equal(attempts.length, 1);
+  assert.deepEqual(events, ["waiting-online", "wait-before-0", "resumed"]);
+});
+
+test("postObject aborts an in-flight XHR when the browser goes offline", async () => {
+  const originalWindow = globalThis.window;
+  const originalXhr = globalThis.XMLHttpRequest;
+  const listeners = new Map();
+  let sent = false;
+  let aborted = false;
+
+  class MockXhr {
+    constructor() {
+      this.upload = {};
+    }
+    open() {}
+    send() {
+      sent = true;
+    }
+    abort() {
+      aborted = true;
+      this.onabort?.();
+    }
+  }
+
+  globalThis.window = {
+    addEventListener(type, fn) {
+      listeners.set(type, fn);
+    },
+    removeEventListener(type, fn) {
+      if (listeners.get(type) === fn) listeners.delete(type);
+    },
+  };
+  globalThis.XMLHttpRequest = MockXhr;
+
+  try {
+    const upload = postObject({
+      link: { endpoint: "https://example.test", bucket: "bucket", fields: {} },
+      key: "prefix/file.fastq.gz",
+      body: new Blob(["x"]),
+      onProgress: () => {},
+    });
+
+    assert.equal(sent, true);
+    listeners.get("offline")();
+
+    await assert.rejects(upload, (err) => {
+      assert.equal(err.updeaconCause, "network");
+      assert.equal(err.offline, true);
+      return /Connection lost/.test(err.message);
+    });
+    assert.equal(aborted, true);
+    assert.equal(listeners.has("offline"), false);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.XMLHttpRequest = originalXhr;
+  }
 });
