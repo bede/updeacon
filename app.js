@@ -1121,15 +1121,16 @@ function makeCredentialUploader() {
 
 function makeLinkUploader(link) {
   let spoolSeq = 0;
+  let runStatus = "";
 
   const retryStatus = (key, info) => {
     const leaf = key.split("/").pop();
     if (info.waitingOnline) {
-      setStatus(`Connection lost. Waiting to retry ${leaf} when the browser is online …`, "waiting");
+      setStatus(`Connection lost. Waiting to retry ${leaf} …`, "waiting");
       return;
     }
     if (info.resumed) {
-      setStatus(`Connection restored. Retrying ${leaf} …`);
+      setStatus(runStatus || `Retrying ${leaf} …`);
       return;
     }
     const secs = Math.max(1, Math.ceil((info.waitMs || 0) / 1000));
@@ -1158,6 +1159,7 @@ function makeLinkUploader(link) {
 
   return {
     async preflight(keyBase) {
+      runStatus = `Filtering and uploading to ${keyBase}`;
       const { expired, text } = describeExpiry(link.expiresAt);
       if (expired) {
         const err = new Error(`This magic link expired ${text} ago.`);
