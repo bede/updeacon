@@ -15,6 +15,12 @@ const {
   isRetryableUploadError,
   postObjectWithRetry,
   postObject,
+  STALL_MS,
+  RESPONSE_MS,
+  SMALL_MS,
+  MEMORY_SPOOL_MAX_BYTES,
+  prepareSpoolStorage,
+  spoolToFile,
 } = presign;
 
 const b64 = (obj) => Buffer.from(JSON.stringify(obj)).toString("base64");
@@ -171,7 +177,7 @@ test("isRetryableUploadError only retries transient upload failures", () => {
     assert.equal(isRetryableUploadError(err), true, String(status));
   }
 
-  for (const cause of ["link", "size", "cors"]) {
+  for (const cause of ["link", "size", "storage", "cors"]) {
     const err = new Error(cause);
     err.updeaconCause = cause;
     assert.equal(isRetryableUploadError(err), false, cause);
@@ -368,5 +374,424 @@ test("postObject aborts an in-flight XHR when the browser goes offline", async (
   } finally {
     globalThis.window = originalWindow;
     globalThis.XMLHttpRequest = originalXhr;
+  }
+});
+
+// --- Idle timeouts ------------------------------------------------------------
+// Timers are injected so these run instantly; the real durations are minutes long.
+
+function fakeTimers() {
+  let seq = 0;
+  let setCount = 0;
+  const pending = new Map();
+  return {
+    setTimerFn(fn, ms) {
+      setCount++;
+      const id = ++seq;
+      pending.set(id, { fn, ms });
+      return id;
+    },
+    clearTimerFn(id) {
+      pending.delete(id);
+    },
+    get armed() {
+      return [...pending.values()].map((t) => t.ms);
+    },
+    get setCount() {
+      return setCount;
+    },
+    // Fire by duration, so tests read as "the stall timer expired"
+    fire(ms) {
+      for (const [id, t] of pending) {
+        if (t.ms !== ms) continue;
+        pending.delete(id);
+        t.fn();
+        return;
+      }
+      throw new Error(`no timer armed for ${ms}ms (armed: ${[...pending.values()].map((t) => t.ms)})`);
+    },
+  };
+}
+
+// A pending promise resolves the sentinel first; a settled one wins the race
+const settledYet = (p) =>
+  Promise.race([p.then(() => true, () => true), Promise.resolve(false)]);
+
+function withMockXhr(run) {
+  const originalWindow = globalThis.window;
+  const originalXhr = globalThis.XMLHttpRequest;
+  const listeners = new Map();
+  let xhr = null;
+
+  class MockXhr {
+    constructor() {
+      this.upload = {};
+      this.status = 200;
+      this.statusText = "OK";
+      this.responseText = "";
+      this.aborted = false;
+      xhr = this;
+    }
+    open() {}
+    send() {}
+    abort() {
+      this.aborted = true;
+      this.onabort?.();
+    }
+    progress(loaded) {
+      this.upload.onprogress?.({ loaded, total: 1000 });
+    }
+    bodySent() {
+      this.upload.onloadend?.();
+    }
+    respond(status = 200) {
+      this.status = status;
+      this.onload?.();
+    }
+  }
+
+  globalThis.window = {
+    addEventListener(type, fn) {
+      listeners.set(type, fn);
+    },
+    removeEventListener(type, fn) {
+      if (listeners.get(type) === fn) listeners.delete(type);
+    },
+  };
+  globalThis.XMLHttpRequest = MockXhr;
+
+  const link = { endpoint: "https://example.test", bucket: "bucket", fields: {} };
+  const start = (timers) =>
+    postObject({
+      link,
+      key: "prefix/file.fastq.gz",
+      body: new Blob(["x"]),
+      onProgress: () => {},
+      setTimerFn: timers.setTimerFn,
+      clearTimerFn: timers.clearTimerFn,
+    });
+
+  return (async () => {
+    try {
+      return await run({ start, goOffline: () => listeners.get("offline")(), xhr: () => xhr });
+    } finally {
+      globalThis.window = originalWindow;
+      globalThis.XMLHttpRequest = originalXhr;
+    }
+  })();
+}
+
+test("a silent upload aborts once the stall timer expires", async () =>
+  withMockXhr(async ({ start, xhr }) => {
+    const timers = fakeTimers();
+    const upload = start(timers);
+
+    xhr().progress(100);
+    xhr().progress(200);
+    timers.fire(STALL_MS);
+
+    await assert.rejects(upload, (err) => {
+      assert.equal(err.updeaconCause, "network");
+      assert.equal(isRetryableUploadError(err), true);
+      return /stalled/i.test(err.message);
+    });
+    assert.equal(xhr().aborted, true);
+    assert.deepEqual(timers.armed, []);
+  }));
+
+test("postObjectWithRetry retries a stalled upload rather than failing the run", async () => {
+  const stalled = await withMockXhr(async ({ start, xhr }) => {
+    const timers = fakeTimers();
+    const upload = start(timers);
+    timers.fire(STALL_MS);
+    return upload.catch((err) => err);
+  });
+
+  const attempts = [];
+  await postObjectWithRetry({
+    link: { expiresAt: Date.parse("2026-07-09T00:10:00Z") },
+    key: "prefix/file.fastq.gz",
+    body: new Blob(["x"]),
+    nowFn: () => Date.parse("2026-07-09T00:00:00Z"),
+    sleepFn: async () => {},
+    postOnce: async () => {
+      attempts.push(1);
+      if (attempts.length === 1) throw stalled;
+    },
+  });
+
+  assert.equal(attempts.length, 2);
+});
+
+test("continuing progress keeps resetting the stall timer", async () =>
+  withMockXhr(async ({ start, xhr }) => {
+    const timers = fakeTimers();
+    const upload = start(timers);
+
+    for (const loaded of [100, 200, 300, 400]) xhr().progress(loaded);
+
+    // One live timer, not one per event
+    assert.deepEqual(timers.armed, [STALL_MS]);
+    assert.equal(await settledYet(upload), false);
+
+    xhr().respond(204);
+    await upload;
+  }));
+
+test("duplicate progress events do not conceal a stalled upload", async () =>
+  withMockXhr(async ({ start, xhr }) => {
+    const timers = fakeTimers();
+    const upload = start(timers);
+
+    xhr().progress(100);
+    const afterAdvance = timers.setCount;
+    xhr().progress(100);
+    assert.equal(timers.setCount, afterAdvance);
+
+    timers.fire(STALL_MS);
+    await assert.rejects(upload, /stalled/i);
+  }));
+
+test("silence after the body is sent is bounded by the response timer", async () =>
+  withMockXhr(async ({ start, xhr }) => {
+    const timers = fakeTimers();
+    const upload = start(timers);
+
+    xhr().progress(1000);
+    assert.deepEqual(timers.armed, [STALL_MS]);
+
+    xhr().bodySent();
+    // The store commits silently; a stall timer here would kill a healthy upload
+    assert.deepEqual(timers.armed, [RESPONSE_MS]);
+
+    timers.fire(RESPONSE_MS);
+    await assert.rejects(upload, (err) => {
+      assert.equal(err.updeaconCause, "network");
+      return /timed out waiting for the object store/i.test(err.message);
+    });
+  }));
+
+test("a slow but arriving response still succeeds, leaving no timer armed", async () =>
+  withMockXhr(async ({ start, xhr }) => {
+    const timers = fakeTimers();
+    const upload = start(timers);
+
+    xhr().progress(1000);
+    xhr().bodySent();
+    xhr().respond(204);
+
+    await upload;
+    assert.deepEqual(timers.armed, []);
+  }));
+
+test("loadend fired by an abort does not arm the response timer", async () =>
+  withMockXhr(async ({ start, xhr, goOffline }) => {
+    const timers = fakeTimers();
+    const upload = start(timers);
+
+    xhr().progress(100);
+    goOffline();
+    xhr().bodySent(); // abort() fires loadend on the upload object too
+
+    await assert.rejects(upload, /Connection lost/);
+    assert.deepEqual(timers.armed, []);
+  }));
+
+test("an offline abort keeps its cause and clears the timers", async () =>
+  withMockXhr(async ({ start, xhr, goOffline }) => {
+    const timers = fakeTimers();
+    const upload = start(timers);
+
+    goOffline();
+
+    await assert.rejects(upload, (err) => {
+      assert.equal(err.offline, true);
+      return /Connection lost/.test(err.message);
+    });
+    // Settled, so a stall timer can no longer fire and reject a second time
+    assert.deepEqual(timers.armed, []);
+  }));
+
+function withMockFetch(impl, run) {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = impl;
+  const timers = fakeTimers();
+  const post = () =>
+    postObject({
+      link: { endpoint: "https://example.test", bucket: "bucket", fields: {} },
+      key: "prefix/_MANIFEST.txt",
+      body: new Blob(["x"]),
+      contentType: "text/plain",
+      setTimerFn: timers.setTimerFn,
+      clearTimerFn: timers.clearTimerFn,
+    });
+  return (async () => {
+    try {
+      return await run({ post, timers });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  })();
+}
+
+test("a silent small-object POST times out and stays retryable", async () =>
+  withMockFetch(
+    (_url, opts) =>
+      new Promise((_resolve, reject) => {
+        opts.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+      }),
+    async ({ post, timers }) => {
+      const upload = post();
+      assert.deepEqual(timers.armed, [SMALL_MS]);
+
+      timers.fire(SMALL_MS);
+      await assert.rejects(upload, (err) => {
+        assert.equal(err.updeaconCause, "network");
+        assert.equal(isRetryableUploadError(err), true);
+        return /timed out/i.test(err.message);
+      });
+      assert.deepEqual(timers.armed, []);
+    }
+  ));
+
+test("the small-object timer is cleared on success", async () =>
+  withMockFetch(
+    async () => ({ ok: true }),
+    async ({ post, timers }) => {
+      await post();
+      assert.deepEqual(timers.armed, []);
+    }
+  ));
+
+test("the small-object timer is cleared on an HTTP error", async () =>
+  withMockFetch(
+    async () => ({
+      ok: false,
+      status: 403,
+      statusText: "Forbidden",
+      text: async () => "<Error><Code>AccessDenied</Code><Message>nope</Message></Error>",
+    }),
+    async ({ post, timers }) => {
+      await assert.rejects(post(), (err) => {
+        assert.equal(err.updeaconCause, "link");
+        return err.name === "AccessDenied";
+      });
+      assert.deepEqual(timers.armed, []);
+    }
+  ));
+
+test("the small-object timer covers a stalled HTTP error body", async () =>
+  withMockFetch(
+    async (_url, opts) => ({
+      ok: false,
+      status: 503,
+      statusText: "Unavailable",
+      text: () =>
+        new Promise((_resolve, reject) => {
+          opts.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+    }),
+    async ({ post, timers }) => {
+      const upload = post();
+      await Promise.resolve();
+      assert.deepEqual(timers.armed, [SMALL_MS]);
+      timers.fire(SMALL_MS);
+      await assert.rejects(upload, /timed out/i);
+      assert.deepEqual(timers.armed, []);
+    }
+  ));
+
+// --- Spool storage ------------------------------------------------------------
+
+test("large link uploads require OPFS rather than an unbounded memory fallback", async () => {
+  await assert.rejects(
+    prepareSpoolStorage(MEMORY_SPOOL_MAX_BYTES + 1, { supported: false }),
+    (err) => err.updeaconCause === "storage" && /OPFS support/i.test(err.message)
+  );
+  await assert.rejects(
+    spoolToFile(new ReadableStream(), "large.bin", { expectedBytes: MEMORY_SPOOL_MAX_BYTES + 1 }),
+    (err) => err.updeaconCause === "storage"
+  );
+});
+
+test("small outputs retain the compatibility memory fallback", async () => {
+  const prepared = await prepareSpoolStorage(1024, { supported: false });
+  assert.deepEqual(prepared, { opfs: false });
+
+  const blob = await spoolToFile(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("reads"));
+        controller.close();
+      },
+    }),
+    "small.bin",
+    { expectedBytes: 5 }
+  );
+  assert.equal(await blob.text(), "reads");
+});
+
+test("spool preparation requests persistence without guessing the filtered size", async () => {
+  let persistCalls = 0;
+  const result = await prepareSpoolStorage(80, {
+    supported: true,
+    persistFn: async () => {
+      persistCalls++;
+      return true;
+    },
+  });
+  assert.equal(persistCalls, 1);
+  assert.deepEqual(result, { opfs: true });
+});
+
+test("an actual OPFS quota failure becomes a clear storage error", async () => {
+  const originalNavigator = globalThis.navigator;
+  const originalHandle = globalThis.FileSystemFileHandle;
+  class MockFileHandle {
+    createWritable() {}
+  }
+  Object.defineProperty(globalThis, "FileSystemFileHandle", {
+    configurable: true,
+    value: MockFileHandle,
+  });
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      storage: {
+        async getDirectory() {
+          return {
+            async getDirectoryHandle() {
+              return {
+                async getFileHandle() {
+                  return {
+                    async createWritable() {
+                      const err = new Error("quota full");
+                      err.name = "QuotaExceededError";
+                      throw err;
+                    },
+                  };
+                },
+              };
+            },
+          };
+        },
+      },
+    },
+  });
+
+  try {
+    await assert.rejects(
+      spoolToFile(new ReadableStream(), "full.bin", { expectedBytes: 1024 }),
+      (err) => err.updeaconCause === "storage" && /private storage/i.test(err.message)
+    );
+  } finally {
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: originalNavigator,
+    });
+    Object.defineProperty(globalThis, "FileSystemFileHandle", {
+      configurable: true,
+      value: originalHandle,
+    });
   }
 });

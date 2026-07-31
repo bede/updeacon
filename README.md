@@ -97,6 +97,13 @@ System temp file before being posted, so memory stays bounded either way. Output
 is never larger than input (depletion only removes reads, and output compression
 matches input), so an input file under 5 GB always fits.
 
+Because a signed POST is not resumable, a connection failure retries the current
+object from byte zero. Slow transfers are allowed to run indefinitely while bytes
+continue moving; prolonged upload or response silence is timed out and retried.
+Large linked uploads require browser OPFS support and enough available origin
+storage for the filtered output. Browsers without OPFS retain an in-memory fallback
+only for outputs up to 64 MiB.
+
 ## Configuration
 
 Defaults live at the top of [`app.js`](app.js) and

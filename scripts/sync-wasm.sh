@@ -43,8 +43,12 @@ VERSION="$(date +%Y%m%d-%H%M%S)"
 for f in app.js worker.js sapiometer.js; do
   perl -i -pe "s/(ASSET_VERSION\s*=\s*\")[^\"]*(\")/\${1}${VERSION}\${2}/g; \
                s/(protocol\.js\?v=)[^\"]*/\${1}${VERSION}/g; \
-               s/(presign\.js\?v=)[^\"]*/\${1}${VERSION}/g" "$ROOT/$f"
+               s/(presign\.js\?v=)[^\"]*/\${1}${VERSION}/g; \
+               s/(pairing\.js\?v=)[^\"]*/\${1}${VERSION}/g; \
+               s/(uploaders\.js\?v=)[^\"]*/\${1}${VERSION}/g" "$ROOT/$f"
 done
+perl -i -pe "s/([?]v=)[^\"]*/\${1}${VERSION}/g" "$ROOT/index.html" "$ROOT/sapiometer/index.html"
+perl -i -pe "s/(presign\.js\?v=)[^\"]*/\${1}${VERSION}/g" "$ROOT/uploaders.js"
 echo "  stamped cache-bust version $VERSION into app.js, worker.js and sapiometer.js"
 
 SRC_HASH="$(git -C "$SRC_REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"

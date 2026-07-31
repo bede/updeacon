@@ -13,7 +13,8 @@ SAPIO_DEST="$PAGES_ROOT/sapiometer"
 SOURCE_HASH="$(git -C "$SRC" rev-parse --short HEAD)"
 # We copy the working tree, not HEAD, so don't label uncommitted code with a clean hash
 if [[ -n "$(git -C "$SRC" status --porcelain)" ]]; then
-  SOURCE_HASH="$SOURCE_HASH-dirty"
+  # Repeated dirty deployments may contain different bytes at the same HEAD.
+  SOURCE_HASH="$SOURCE_HASH-dirty-$(date -u +%Y%m%d%H%M%S)"
 fi
 
 # Files deployed into updeacon-s3/ (paths relative to both SRC and DEST). This is
@@ -24,6 +25,7 @@ FILES=(
   app.js
   pairing.js
   presign.js
+  uploaders.js
   worker.js
   protocol.js
   vendor/aws-sdk.js
@@ -54,6 +56,16 @@ done
 # Stamp the deployed app.js with the source commit so the page logs it on load.
 sed -i '' "s/const BUILD_COMMIT = \"dev\";/const BUILD_COMMIT = \"$SOURCE_HASH\";/" "$DEST/app.js"
 
+# One deployment is one coherent module graph. Stamp every source cache token
+# with the revision so a new entry point can never import an older dependency.
+stamp_versions() {
+  for target in "$@"; do
+    [[ -f "$target" ]] || continue
+    sed -i '' -E "s/(ASSET_VERSION = \"|[?]v=)[0-9]{8}-[0-9]{6}/\\1$SOURCE_HASH/g" "$target"
+  done
+}
+stamp_versions "$DEST/index.html" "$DEST/app.js" "$DEST/uploaders.js" "$DEST/worker.js"
+
 echo "Deployed to $DEST"
 
 mkdir -p "$SAPIO_DEST/pkg"
@@ -62,6 +74,7 @@ sed -i '' 's#\.\./sapiometer\.js#./sapiometer.js#' "$SAPIO_DEST/index.html"
 for f in sapiometer.js worker.js protocol.js pairing.js pkg/deacon_wasm.js pkg/deacon_wasm_bg.wasm; do
   cp "$SRC/$f" "$SAPIO_DEST/$f"
 done
+stamp_versions "$SAPIO_DEST/index.html" "$SAPIO_DEST/sapiometer.js" "$SAPIO_DEST/worker.js"
 
 echo "Deployed to $SAPIO_DEST"
 
