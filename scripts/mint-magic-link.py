@@ -7,9 +7,13 @@ pre-authorised. Unlike a presigned PUT URL, one policy covers any number of file
 the link is reusable until it expires; each upload gets its own timestamped directory
 inside the prefix.
 
-Needs the AWS CLI configured for the target bucket. No third-party packages.
+Needs the AWS CLI configured for the target bucket. The S3 endpoint comes from
+--endpoint, else AWS_ENDPOINT_URL_S3 / AWS_ENDPOINT_URL, else the profile's
+`endpoint_url`. No third-party packages.
 
-    scripts/mint-upload-link.py inrb-batch3 --profile climb
+For CLIMB:
+
+    scripts/mint-magic-link.py inrb-batch3 --profile climb --endpoint https://s3.climb.ac.uk
 """
 
 import argparse
@@ -19,11 +23,11 @@ import hmac
 import json
 import re
 import secrets
+import os
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 
-ENDPOINT = "https://s3.climb.ac.uk"
 BUCKET = "cli-artic-drc-co-inrb-uploads"
 REGION = "us-east-1"  # dummy; Ceph RGW ignores it but it must match the signature
 BASE_URL = "https://bede.github.io/updeacon-s3/"
@@ -82,6 +86,31 @@ def resolve_credentials(profile, allow_session_token):
             "--allow-session-token if you understand the link will expire early."
         )
     return creds["AccessKeyId"], creds["SecretAccessKey"], creds.get("SessionToken")
+
+
+def resolve_endpoint(explicit, profile):
+    """Return (endpoint, source): --endpoint, else env, else the AWS CLI profile."""
+    for value, source in (
+        (explicit, "--endpoint"),
+        (os.environ.get("AWS_ENDPOINT_URL_S3"), "AWS_ENDPOINT_URL_S3"),
+        (os.environ.get("AWS_ENDPOINT_URL"), "AWS_ENDPOINT_URL"),
+    ):
+        if value:
+            return value.rstrip("/"), source
+    cmd = ["aws", "configure", "get", "endpoint_url"]
+    if profile:
+        cmd += ["--profile", profile]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True).stdout.strip()
+    except FileNotFoundError:
+        raise SystemExit("error: the aws CLI is not on PATH")
+    if not out:
+        raise SystemExit(
+            "error: no S3 endpoint configured. Pass --endpoint, set AWS_ENDPOINT_URL, or add\n"
+            "`endpoint_url = https://...` to the AWS CLI profile. For CLIMB:\n"
+            "  --endpoint https://s3.climb.ac.uk"
+        )
+    return out.rstrip("/"), f"profile {profile or 'default'}"
 
 
 def build_policy(bucket, prefix, region, access_key, session_token, expires_at, now, max_bytes):
@@ -170,7 +199,7 @@ def main():
     p.add_argument("name", nargs="?", help="human label for the upload; a random suffix is appended")
     p.add_argument("--profile", help="AWS CLI profile to sign with")
     p.add_argument("--bucket", default=BUCKET)
-    p.add_argument("--endpoint", default=ENDPOINT)
+    p.add_argument("--endpoint", help="S3 endpoint URL (default: from the AWS CLI config)")
     p.add_argument("--region", default=REGION)
     p.add_argument("--base-url", default=BASE_URL, help="where updeacon is served")
     p.add_argument("--days", type=int, default=MAX_DAYS, help=f"link lifetime (max {MAX_DAYS})")
@@ -182,12 +211,13 @@ def main():
     if args.self_test:
         raise SystemExit(self_test())
     if not args.name:
-        p.error("an upload name is required, e.g. `mint-upload-link.py inrb-batch3`")
+        p.error("an upload name is required, e.g. `mint-magic-link.py inrb-batch3`")
     if not 1 <= args.days <= MAX_DAYS:
         p.error(f"--days must be between 1 and {MAX_DAYS} (SigV4 signatures cannot outlive 7 days)")
     if not 1 <= args.max_bytes <= POST_MAX_BYTES:
         p.error(f"--max-bytes must be between 1 and {POST_MAX_BYTES} (S3 POST Object limit)")
 
+    endpoint, endpoint_source = resolve_endpoint(args.endpoint, args.profile)
     access_key, secret, token = resolve_credentials(args.profile, args.allow_session_token)
 
     now = datetime.now(timezone.utc).replace(microsecond=0)
@@ -199,10 +229,11 @@ def main():
     )
     sign_policy(fields, secret, datestamp, args.region, encoded)
 
-    payload = {"v": 1, "endpoint": args.endpoint.rstrip("/"), "fields": fields}
+    payload = {"v": 1, "endpoint": endpoint, "fields": fields}
     blob = b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     link = f"{args.base_url.rstrip('/')}/#u={blob}"
 
+    print(f"endpoint {endpoint} ({endpoint_source})")
     print(f"bucket   {args.bucket}")
     print(f"prefix   {prefix}")
     print(f"expires  {expires_at.strftime('%Y-%m-%dT%H:%M:%SZ')} ({args.days} days)")

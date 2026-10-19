@@ -24,13 +24,18 @@ per-file size limit.
 
 ## Creating a presigned upload link
 
-Run on a machine whose AWS CLI can write to the bucket:
+Run on a machine whose AWS CLI can write to the bucket. For CLIMB:
 
 ```sh
-scripts/mint-upload-link.py inrb-batch3 --profile climb
+scripts/mint-magic-link.py inrb-batch3 --profile climb --endpoint https://s3.climb.ac.uk
 ```
 
+The endpoint is not hardcoded. Without `--endpoint` it comes from
+`AWS_ENDPOINT_URL_S3` / `AWS_ENDPOINT_URL`, else the profile's `endpoint_url` in
+`~/.aws/config`. The first line of output says which one was used.
+
 ```
+endpoint https://s3.climb.ac.uk (--endpoint)
 bucket   cli-artic-drc-co-inrb-uploads
 prefix   inrb-batch3-k7q2/
 expires  2026-07-16T14:22:00Z (7 days)
@@ -107,14 +112,14 @@ only for outputs up to 64 MiB.
 ## Configuration
 
 Defaults live at the top of [`app.js`](app.js) and
-[`scripts/mint-upload-link.py`](scripts/mint-upload-link.py):
+[`scripts/mint-magic-link.py`](scripts/mint-magic-link.py):
 
-| Setting     | Value                               |
-| ----------- | ----------------------------------- |
-| Endpoint    | `https://s3.climb.ac.uk` (Ceph RGW) |
-| Bucket      | `cli-artic-drc-co-inrb-uploads`     |
-| Region      | `us-east-1` (dummy; RGW ignores it) |
-| Addressing  | path-style (`forcePathStyle: true`) |
+| Setting    | Value                                                                       |
+| ---------- | --------------------------------------------------------------------------- |
+| Endpoint   | not hardcoded: entered in the form, or `--endpoint` / AWS CLI config        |
+| Bucket     | `cli-artic-drc-co-inrb-uploads`                                             |
+| Region     | `us-east-1` (dummy; RGW ignores it)                                         |
+| Addressing | path-style (`forcePathStyle: true`)                                         |
 
 ## Bucket CORS (required)
 
@@ -126,6 +131,10 @@ CORS preflight that the bucket must answer. Apply [`cors.json`](cors.json):
 ```sh
 sh set-cors.sh
 ```
+
+`set-cors.sh` runs plain `aws`, which knows nothing of the CLIMB default: give the
+`climb` profile `endpoint_url = https://s3.climb.ac.uk` in `~/.aws/config`, or run
+`AWS_ENDPOINT_URL=https://s3.climb.ac.uk sh set-cors.sh`.
 
 Tighten `AllowedOrigins` from `*` to the exact serving origin in production.
 
@@ -145,10 +154,10 @@ Then open `http://localhost:8000/`. To exercise link mode, mint a link pointing 
 your local server:
 
 ```sh
-scripts/mint-upload-link.py smoke --base-url http://localhost:8000
+scripts/mint-magic-link.py smoke --base-url http://localhost:8000
 ```
 
-Tests: `node --test "tests/*.test.mjs"` and `scripts/mint-upload-link.py --self-test`.
+Tests: `node --test "tests/*.test.mjs"` and `scripts/mint-magic-link.py --self-test`.
 
 ## Deploying
 

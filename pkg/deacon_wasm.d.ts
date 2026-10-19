@@ -5,7 +5,7 @@ export class FilterSession {
     free(): void;
     [Symbol.dispose](): void;
     finish(): Uint8Array;
-    constructor(index: WasmIndex, deplete: boolean, abs_threshold: number, rel_threshold: number, decompress_input: boolean, compress_output: boolean, rename: boolean, output_fasta: boolean);
+    constructor(index: WasmIndex, deplete: boolean, abs_threshold: number, rel_threshold: number, decompress_input: boolean, compress_output: boolean, rename: boolean, discard_quality: boolean);
     output_compressed(): boolean;
     pending_bytes(): number;
     push_chunk(chunk: Uint8Array): Uint8Array;
@@ -17,7 +17,7 @@ export class PairedFilterSession {
     [Symbol.dispose](): void;
     finish_r1(): any;
     finish_r2(): any;
-    constructor(index: WasmIndex, deplete: boolean, abs_threshold: number, rel_threshold: number, decompress_r1: boolean, decompress_r2: boolean, compress_r1: boolean, compress_r2: boolean, rename: boolean, output_fasta: boolean);
+    constructor(index: WasmIndex, deplete: boolean, abs_threshold: number, rel_threshold: number, decompress_r1: boolean, decompress_r2: boolean, compress_r1: boolean, compress_r2: boolean, rename: boolean, discard_quality: boolean);
     push_r1(chunk: Uint8Array): any;
     push_r2(chunk: Uint8Array): any;
     stats(): any;
@@ -38,14 +38,14 @@ export interface InitOutput {
     readonly __wbg_pairedfiltersession_free: (a: number, b: number) => void;
     readonly __wbg_wasmindex_free: (a: number, b: number) => void;
     readonly filtersession_finish: (a: number) => [number, number, number, number];
-    readonly filtersession_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
+    readonly filtersession_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
     readonly filtersession_output_compressed: (a: number) => number;
     readonly filtersession_pending_bytes: (a: number) => number;
     readonly filtersession_push_chunk: (a: number, b: number, c: number) => [number, number, number, number];
     readonly filtersession_stats: (a: number) => [number, number, number];
     readonly pairedfiltersession_finish_r1: (a: number) => [number, number, number];
     readonly pairedfiltersession_finish_r2: (a: number) => [number, number, number];
-    readonly pairedfiltersession_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => number;
+    readonly pairedfiltersession_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number];
     readonly pairedfiltersession_push_r1: (a: number, b: number, c: number) => [number, number, number];
     readonly pairedfiltersession_push_r2: (a: number, b: number, c: number) => [number, number, number];
     readonly pairedfiltersession_stats: (a: number) => [number, number, number];
