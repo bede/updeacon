@@ -355,7 +355,7 @@ async function handleFiles(files) {
   const group = groups[0];
   dropZone.classList.add("loaded");
   dropSummary.textContent =
-    group.kind === "paired" ? `Pair · ${group.label}` : `Single · ${group.label}`;
+    group.kind === "paired" ? `Pair: ${group.label}` : `Single: ${group.label}`;
 
   busy = true;
   dropZone.classList.add("busy");

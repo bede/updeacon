@@ -293,7 +293,7 @@ function setSelection(files) {
     if (singles) parts.push(`${singles} unpaired`);
     dirSummary.textContent = `${seqs.length} sequence file${
       seqs.length === 1 ? "" : "s"
-    } selected (${parts.join(", ")}) · ${humanBytes(totalBytes)}`;
+    } selected (${parts.join(", ")}), ${humanBytes(totalBytes)} in total`;
   }
   oversizeFiles = findOversizeFiles(selectedFiles);
   if (oversizeFiles.length) {
@@ -951,7 +951,7 @@ async function filterOnly() {
         const pct = totalBytes ? ((dehostedBefore + curProcessed) / totalBytes) * 100 : 0;
         dehostProgress.value = pct;
         dehostLabel.textContent =
-          `Filtering ${i + 1} of ${groups.length} · ` +
+          `Filtering ${i + 1} of ${groups.length}: ` +
           `${humanBytes(dehostedBefore + curProcessed)} / ${humanBytes(totalBytes)} ` +
           `(${pct.toFixed(1)}%)`;
         renderRow();
@@ -980,7 +980,7 @@ async function filterOnly() {
       const readsIn = Number(fileStats?.readsIn || 0);
       const readsOut = Number(fileStats?.readsOut || 0);
       rows[i].st.textContent = readsIn
-        ? `done · ${readsOut.toLocaleString()}/${readsIn.toLocaleString()} reads kept`
+        ? `done. ${readsOut.toLocaleString()}/${readsIn.toLocaleString()} reads kept`
         : "done";
       completed++;
     }
@@ -1102,14 +1102,14 @@ async function uploadAll() {
         const dpct = item.size ? Math.min(100, (curProcessed / item.size) * 100) : 100;
         rows[i].st.textContent = LINK
           ? `filtering ${dpct.toFixed(0)}%`
-          : `filtered ${dpct.toFixed(0)}% · uploaded ${humanBytes(curUploaded)}`;
+          : `filtered ${dpct.toFixed(0)}%, uploaded ${humanBytes(curUploaded)}`;
       };
       const onProgress = (m) => {
         curProcessed = m.bytesProcessed || 0;
         const pct = totalBytes ? ((dehostedBefore + curProcessed) / totalBytes) * 100 : 0;
         dehostProgress.value = pct;
         dehostLabel.textContent =
-          `Filtering ${i + 1} of ${items.length} · ` +
+          `Filtering ${i + 1} of ${items.length}: ` +
           `${humanBytes(dehostedBefore + curProcessed)} / ${humanBytes(totalBytes)} ` +
           `(${pct.toFixed(1)}%)`;
         renderRow();
@@ -1128,7 +1128,7 @@ async function uploadAll() {
         curUploaded = loaded;
         if (uploading) {
           dehostLabel.textContent =
-            `Uploading ${i + 1} of ${items.length} · ` +
+            `Uploading ${i + 1} of ${items.length}: ` +
             `${humanBytes(curUploaded)} / ${humanBytes(uploadTotal)}`;
         }
         renderRow();
@@ -1153,7 +1153,7 @@ async function uploadAll() {
       const readsIn = Number(fileStats?.readsIn || 0);
       const readsOut = Number(fileStats?.readsOut || 0);
       rows[i].st.textContent = readsIn
-        ? `done · ${readsOut.toLocaleString()}/${readsIn.toLocaleString()} reads uploaded`
+        ? `done. ${readsOut.toLocaleString()}/${readsIn.toLocaleString()} reads uploaded`
         : "done";
       completed++;
     }
