@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Mint a presigned updeacon upload link.
 
-Signs an S3 POST policy whose `starts-with` condition on `$key` authorises uploads
-anywhere under one prefix, packed into a URL fragment that opens updeacon
-pre-authorised. Unlike a presigned PUT URL, one policy covers any number of files, so
-the link is reusable until it expires; each upload gets its own timestamped directory
-inside the prefix.
+Signs an S3 POST policy whose `starts-with` conditioned on `$key` authorises uploads
+anywhere under a prefix, crammed into URL fragment that opens pre-authed updeacon.
+Works for any numbers of files, so the link is reusable until it expires. Each upload
+gets its own own timestamped subdir insid prefix.
 
 Needs the AWS CLI configured for the target bucket. The S3 endpoint comes from
 --endpoint, else AWS_ENDPOINT_URL_S3 / AWS_ENDPOINT_URL, else the profile's

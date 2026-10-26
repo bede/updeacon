@@ -10,7 +10,7 @@ import {
   releaseSpool,
   prepareSpoolStorage,
   SMALL_MS,
-} from "./presign.js?v=20261023-130256";
+} from "./presign.js?v=20261026-111304";
 
 const onlineNow = () => typeof navigator === "undefined" || navigator.onLine !== false;
 
