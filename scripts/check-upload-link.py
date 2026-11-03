@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke-test a presigned updeacon upload link against the real object store.
+"""Smoke-test a magic link against the real object store.
 
 Verifies the two things only a live bucket can answer: that it accepts our POST
 policy, and that it refuses writes outside the authorised prefix.
@@ -41,7 +41,7 @@ def parse_link(url: str):
 
 
 def post_object(endpoint, bucket, fields, key, body):
-    """Mirrors presign.js: key first, file last, fields verbatim."""
+    """Mirrors seq2bucket/post.js: key first, file last, fields verbatim."""
     boundary = f"----updeacon{secrets.token_hex(8)}"
     parts = []
 

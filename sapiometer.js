@@ -1,6 +1,6 @@
 // sapiometer: in-browser human-content check
 import { MSG, DETECT_DEFAULTS } from "./protocol.js?v=20261026-111304";
-import { SEQ_RE, pairSequenceFiles } from "./pairing.js?v=20261026-111304";
+import { SEQ_RE, pairSequenceFiles } from "./seq2bucket/pairing.js?v=20261026-111304";
 
 const ASSET_VERSION = "20261026-111304";
 

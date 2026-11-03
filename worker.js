@@ -1,6 +1,6 @@
 import { MSG, FILTER_DEFAULTS } from "./protocol.js?v=20261026-111304";
 
-// Off-main-thread WASM dehosting; pull-driven (one batch per MSG.PULL) so memory stays bounded
+// Off-main-thread Deacon filtering; pull-driven (one batch per MSG.PULL) so memory stays bounded
 let wasm = null;
 let index = null;
 const ASSET_VERSION = "20261026-111304";

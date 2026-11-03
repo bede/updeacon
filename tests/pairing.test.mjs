@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const source = await readFile(resolve(here, "../pairing.js"), "utf8");
+const source = await readFile(resolve(here, "../seq2bucket/pairing.js"), "utf8");
 const pairing = await import(`data:text/javascript,${encodeURIComponent(source)}`);
 const { pairSequenceFiles, describeGroups } = pairing;
 

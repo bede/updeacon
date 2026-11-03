@@ -1,165 +1,48 @@
-# updeacon
+# Updeacon
 
-A client-side web tool that dehosts `fastq`/`fasta` files (optionally `.gz`) with
-[Deacon](https://github.com/bede/deacon) and uploads the cleaned reads to
-S3-compatible object storage. Human reads are removed in the browser, so
-contaminant sequences never leave the machine. Files land in a timestamped folder
-with their original names and directory structure preserved. Output is always
-gzip-compressed; an uncompressed input is uploaded with a `.gz` suffix added.
+[Updeacon](bede.im/updeacon-s3) seamlessly decontaminates and uploads FASTA/Q files to S3-compatible storage simply by dragging and dropping files into a web browser, facilitating privacy-preserving genomic data sharing. By default, Updeacon depletes human sequences before uploading the remaining sequences directly to a specified S3 bucket inside a timestamped directory. Updeacon communicates exclusively with the chosen S3 bucket and requires no third party trust. Updeacon was developed to facilitate responsible data sharing across international borders and engineered to work over unstable internet connections. Using hardware-accelerated WebAssembly, Updeacon is capable of decontaminating sequences at up to 100 Mbp/s.
 
-Filtering runs as WebAssembly ([`pkg/`](pkg/)) inside a Web Worker
-([`worker.js`](worker.js)), keeping the UI responsive. An index is required. The
-compact [panhuman-1](https://objectstorage.uk-london-1.oraclecloud.com/n/lrbvkel2wjot/b/human-genome-bucket/o/deacon/3/panhuman-1.k31w25c9b16.pidx)
-index is downloaded on first use and cached in IndexedDB.
+**Updeacon may be used in two ways:**
 
-## Two ways to upload
+1. **Manual mode** in which S3 bucket credentials are entered manually.
+2. **Magic link mode**, in which the receiving party generates a pre-authenticated Updeacon URL and shares it with the receiving party. This URL grants upload permission only to a specific prefix in the bucket, and is valid for up to 7 days.
 
-**Presigned link** (recommended for collaborators). Someone with bucket access
-sends a URL. Opening it authorises uploads into one prefix for up to 7 days, with
-no credentials to distribute or leak.
+## Creating a magic link as the receiving party
 
-**S3 credentials.** Open the app with no link and enter an access key ID and
-secret access key. Uploads stream directly into a multipart upload, so there is no
-per-file size limit.
+Magic links work using a presigned S3 POST policy authorising uploads anywhere under a specified bucket prefix for up to 7 days.
 
-## Creating a presigned upload link
+**From the browser**, follow *mint magic link* at the bottom of the Updeacon page (`/updeacon-s3/mint.html`). Enter the bucket's endpoint and credentials, and press *Make link*. The link is signed in the browser without sending credentials anywhere. The page must be served over HTTPS or from localhost.
 
-Run on a machine whose AWS CLI can write to the bucket. For CLIMB:
+**From the command line**, use an AWS CLI profile that can write to the bucket and run:
 
 ```sh
-scripts/mint-magic-link.py inrb-batch3 --profile climb --endpoint https://s3.climb.ac.uk
+scripts/mint-magic-link.py test-upload --profile climb --endpoint https://s3.climb.ac.uk
 ```
 
-The endpoint is not hardcoded. Without `--endpoint` it comes from
-`AWS_ENDPOINT_URL_S3` / `AWS_ENDPOINT_URL`, else the profile's `endpoint_url` in
-`~/.aws/config`. The first line of output says which one was used.
+Other flags: `--days`, `--max-bytes`, `--bucket`, `--base-url`.
 
-```
-endpoint https://s3.climb.ac.uk (--endpoint)
-bucket   cli-artic-drc-co-inrb-uploads
-prefix   inrb-batch3-k7q2/
-expires  2026-07-16T14:22:00Z (7 days)
-max size 5.0 GB per file
+Anyone with a magic link can upload to its target bucket prefix until either the request itself or the credentials associated with it expire or are revoked.
 
-https://bede.github.io/updeacon-s3/#u=eyJ2IjoxLCJlbmRwb2ludCI6...
-```
+## seq2bucket
 
-Send that URL to whoever is uploading. The `letter-digit-letter-digit` suffix
-avoids collisions between links; it is not a secret.
+[seq2bucket](bede.im/seq2bucket) uploads FASTA/Q files to S3-compatible storage unmodified, without human read removal. It works the same way as Updeacon, with manual credentials or a magic link, and is the shared upload layer that Updeacon is built upon.
 
-The link is reusable until it expires. Each upload creates its own timestamped
-directory inside the prefix, so repeat uploads never overwrite one another:
-
-```
-inrb-batch3-k7q2/
-├── 2026-07-09T14-30-00Z--flowcell1/
-│   ├── sample_R1.fastq.gz
-│   ├── sample_R1.fastq.gz.deacon.json
-│   ├── _CLIENT.json
-│   └── _MANIFEST.txt
-└── 2026-07-11T09-02-13Z--flowcell2/
-```
-
-`_MANIFEST.txt` is written last and lists every object uploaded, so its presence
-means the upload completed in full. `_CLIENT.json` is written first, before any
-filtering: it confirms the link can write, and records who uploaded what (updeacon
-version and commit, deacon version, index, browser, OS, timezone, and the number
-and size of files intended). A directory with a `_CLIENT.json` but no
-`_MANIFEST.txt` was interrupted before it finished.
-
-Useful flags: `--days N` (max 7), `--max-bytes N`, `--bucket`, `--endpoint`,
-`--base-url`, `--region`. `--self-test` checks the signing implementation against
-AWS's published SigV4 test vectors.
-
-### How it works, and what it grants
-
-A presigned `PUT` URL signs one object key, which is useless when uploading many
-files whose names aren't known in advance. This instead signs an S3 POST policy
-containing `["starts-with", "$key", "inrb-batch3-k7q2/"]`: one signature
-authorising any key under that prefix.
-
-The object store enforces that. A leaked link can write anywhere under its own
-prefix and nothing else. It cannot list, read, or delete, each object is capped
-(5 GB by default), and it stops working at expiry. It can overwrite objects within
-its own prefix, so enable bucket versioning if that matters. Rotating the signing
-key invalidates every outstanding link at once.
-
-The signed policy travels in the URL fragment, which browsers never send to the
-web server, so it stays out of GitHub Pages logs and `Referer` headers. It is
-still a bearer credential: share it like a password.
-
-Sign with long-lived IAM user keys. SigV4 caps signature validity at 7 days, and
-temporary credentials would invalidate the link the moment the session expires;
-the script refuses them unless you pass `--allow-session-token`.
-
-## Limitations
-
-Linked uploads are capped at 5 GB per file. `POST Object` is a single-shot upload
-with no multipart support and a hard 5 GB object limit, so a link cannot post
-anything larger. Credential-mode uploads stream into a multipart upload and have
-no such cap. In link mode the filtered output is spooled to an Origin Private File
-System temp file before being posted, so memory stays bounded either way. Output
-is never larger than input (depletion only removes reads, and output compression
-matches input), so an input file under 5 GB always fits.
-
-Because a signed POST is not resumable, a connection failure retries the current
-object from byte zero. Slow transfers are allowed to run indefinitely while bytes
-continue moving; prolonged upload or response silence is timed out and retried.
-Large linked uploads require browser OPFS support and enough available origin
-storage for the filtered output. Browsers without OPFS retain an in-memory fallback
-only for outputs up to 64 MiB.
-
-## Configuration
-
-Defaults live at the top of [`app.js`](app.js) and
-[`scripts/mint-magic-link.py`](scripts/mint-magic-link.py):
-
-| Setting    | Value                                                                       |
-| ---------- | --------------------------------------------------------------------------- |
-| Endpoint   | not hardcoded: entered in the form, or `--endpoint` / AWS CLI config        |
-| Bucket     | `cli-artic-drc-co-inrb-uploads`                                             |
-| Region     | `us-east-1` (dummy; RGW ignores it)                                         |
-| Addressing | path-style (`forcePathStyle: true`)                                         |
-
-## Bucket CORS (required)
-
-A browser cannot upload unless the bucket allows this page's origin and exposes
-the `ETag` header. Multipart uploads read each part's ETag; presigned POSTs carry
-an upload-progress listener, which makes them non-simple requests and triggers a
-CORS preflight that the bucket must answer. Apply [`cors.json`](cors.json):
+Uploads go under a `raw/` prefix, away from data assumed to be human-depleted. Magic links for seq2bucket are created the same two ways: from *mint magic link* at the bottom of the seq2bucket page (`/seq2bucket/mint.html`), or with `--raw`:
 
 ```sh
-sh set-cors.sh
+scripts/mint-magic-link.py inrb-batch3 --raw --profile climb --endpoint https://s3.climb.ac.uk
 ```
 
-`set-cors.sh` runs plain `aws`, which knows nothing of the CLIMB default: give the
-`climb` profile `endpoint_url = https://s3.climb.ac.uk` in `~/.aws/config`, or run
-`AWS_ENDPOINT_URL=https://s3.climb.ac.uk sh set-cors.sh`.
+## Bucket CORS
 
-Tighten `AllowedOrigins` from `*` to the exact serving origin in production.
+The bucket must allow `PUT`/`POST` from the page's origin and expose `ETag`. Apply [`cors.json`](cors.json) with `sh set-cors.sh` (set `AWS_ENDPOINT_URL=https://s3.climb.ac.uk` for CLIMB), and narrow `AllowedOrigins` from `*` in production.
 
-The index host must also allow cross-origin `GET`, and expose `Content-Length` for
-an accurate progress bar. If it doesn't, the download fails and the index panel
-becomes a drop target for a local `.idx`/`.pidx`.
-
-## Running locally
-
-No build step, no CDN. Serve over HTTP (ES modules don't load from `file://`):
+## Development
 
 ```sh
-python3 -m http.server 8000
-```
-
-Then open `http://localhost:8000/`. To exercise link mode, mint a link pointing at
-your local server:
-
-```sh
+python3 -m http.server 8000                                   # then open /, /seq2bucket/ or /sapiometer/
 scripts/mint-magic-link.py smoke --base-url http://localhost:8000
+node --test "tests/*.test.mjs"
 ```
 
-Tests: `node --test "tests/*.test.mjs"` and `scripts/mint-magic-link.py --self-test`.
-
-## Deploying
-
-`scripts/deploy.sh` copies both apps into the `bede.github.io` Jekyll site and
-pushes.
+`scripts/deploy.sh` copies the apps into the `bede.github.io` site and pushes. `scripts/sync-wasm.sh` updates the Deacon bundle in `pkg/` from `../deacon`. The release version is in [`seq2bucket/version.js`](seq2bucket/version.js).

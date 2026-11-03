@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Mint a presigned updeacon upload link.
+"""Mint a magic link: a presigned upload link for updeacon-s3 or seq2bucket.
 
-Signs an S3 POST policy whose `starts-with` conditioned on `$key` authorises uploads
-anywhere under a prefix, crammed into URL fragment that opens pre-authed updeacon.
-Works for any numbers of files, so the link is reusable until it expires. Each upload
-gets its own own timestamped subdir insid prefix.
+Signs an S3 POST policy whose `starts-with` condition on `$key` authorises uploads
+anywhere under a prefix, and packs it into the URL fragment of the upload page.
+Works for any number of files, so the link is reusable until it expires. Each upload
+gets its own timestamped subdir inside the prefix.
 
 Needs the AWS CLI configured for the target bucket. The S3 endpoint comes from
 --endpoint, else AWS_ENDPOINT_URL_S3 / AWS_ENDPOINT_URL, else the profile's
@@ -13,6 +13,10 @@ Needs the AWS CLI configured for the target bucket. The S3 endpoint comes from
 For CLIMB:
 
     scripts/mint-magic-link.py inrb-batch3 --profile climb --endpoint https://s3.climb.ac.uk
+
+--raw mints a link to the seq2bucket page, which uploads files with no human
+depletion, under a raw/ prefix. Without it, the link opens updeacon-s3, which
+filters with Deacon first. The page decides the behaviour; the policy is the same.
 """
 
 import argparse
@@ -29,13 +33,15 @@ from datetime import datetime, timedelta, timezone
 
 BUCKET = "cli-artic-drc-co-inrb-uploads"
 REGION = "us-east-1"  # dummy; Ceph RGW ignores it but it must match the signature
-BASE_URL = "https://bede.github.io/updeacon-s3/"
+BASE_URL = "https://bede.im/updeacon-s3/"  # filters with Deacon, then uploads
+RAW_BASE_URL = "https://bede.im/seq2bucket/"  # uploads files without filtering
 
 ALGORITHM = "AWS4-HMAC-SHA256"
 POST_MAX_BYTES = 5 * 1024**3  # S3 POST Object caps a single upload at 5 GB
 MAX_DAYS = 7  # SigV4 signatures are invalid beyond 604800 s
 SUFFIX_LETTERS = "abcdefghijklmnopqrstuvwxyz"
 SUFFIX_DIGITS = "0123456789"
+RAW_ROOT = "raw/"  # keeps unfiltered uploads out of paths assumed to be human-depleted
 
 
 def _hmac(key: bytes, msg: str) -> bytes:
@@ -57,12 +63,12 @@ def sanitise(name: str) -> str:
     return slug
 
 
-def make_prefix(name: str) -> str:
+def make_prefix(name: str, raw: bool = False) -> str:
     """The suffix avoids collisions, not guessing; the signature is the secret."""
     suffix = "".join(
         secrets.choice(SUFFIX_LETTERS if i % 2 == 0 else SUFFIX_DIGITS) for i in range(4)
     )
-    return f"{sanitise(name)}-{suffix}/"
+    return f"{RAW_ROOT if raw else ''}{sanitise(name)}-{suffix}/"
 
 
 def resolve_credentials(profile, allow_session_token):
@@ -189,6 +195,11 @@ def self_test():
     assert policy["expiration"] == "2026-07-16T14:22:00Z"
     assert len(fields["x-amz-signature"]) == 64
 
+    raw_prefix = make_prefix("Smoke Test!!", raw=True)
+    if not re.fullmatch(r"raw/smoke-test-([a-z][0-9]){2}/", raw_prefix):
+        print(f"FAIL raw prefix shape: {raw_prefix}", file=sys.stderr)
+        return 1
+
     print("self-test ok")
     return 0
 
@@ -200,10 +211,18 @@ def main():
     p.add_argument("--bucket", default=BUCKET)
     p.add_argument("--endpoint", help="S3 endpoint URL (default: from the AWS CLI config)")
     p.add_argument("--region", default=REGION)
-    p.add_argument("--base-url", default=BASE_URL, help="where updeacon is served")
+    p.add_argument(
+        "--base-url",
+        help=f"page the link opens (default: {BASE_URL}, or {RAW_BASE_URL} with --raw)",
+    )
     p.add_argument("--days", type=int, default=MAX_DAYS, help=f"link lifetime (max {MAX_DAYS})")
     p.add_argument("--max-bytes", type=int, default=POST_MAX_BYTES, help="per-object size cap")
     p.add_argument("--allow-session-token", action="store_true")
+    p.add_argument(
+        "--raw",
+        action="store_true",
+        help="link to seq2bucket: upload files WITHOUT human depletion (prefix under raw/)",
+    )
     p.add_argument("--self-test", action="store_true", help="verify signing against AWS test vectors")
     args = p.parse_args()
 
@@ -221,7 +240,7 @@ def main():
 
     now = datetime.now(timezone.utc).replace(microsecond=0)
     expires_at = now + timedelta(days=args.days)
-    prefix = make_prefix(args.name)
+    prefix = make_prefix(args.name, raw=args.raw)
 
     fields, datestamp, encoded = build_policy(
         args.bucket, prefix, args.region, access_key, token, expires_at, now, args.max_bytes
@@ -230,18 +249,25 @@ def main():
 
     payload = {"v": 1, "endpoint": endpoint, "fields": fields}
     blob = b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    link = f"{args.base_url.rstrip('/')}/#u={blob}"
+    base_url = args.base_url or (RAW_BASE_URL if args.raw else BASE_URL)
+    link = f"{base_url.rstrip('/')}/#u={blob}"
 
     print(f"endpoint {endpoint} ({endpoint_source})")
     print(f"bucket   {args.bucket}")
     print(f"prefix   {prefix}")
     print(f"expires  {expires_at.strftime('%Y-%m-%dT%H:%M:%SZ')} ({args.days} days)")
     print(f"max size {args.max_bytes / 1024**3:.1f} GB per file")
+    print(f"page     {base_url} ({'raw: NO human depletion' if args.raw else 'Deacon filtering'})")
     print()
     print(link)
     print()
     print("Anyone with this link can upload into that prefix until it expires.", file=sys.stderr)
     print("They cannot list, read or delete anything. Share it like a password.", file=sys.stderr)
+    if args.raw:
+        print(
+            "RAW LINK: files are uploaded without filtering. Human reads are NOT removed.",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":

@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const { checkReachable, makeLinkUploader } = await import(
-  `${pathToFileURL(resolve(here, "../uploaders.js"))}?test=${Date.now()}`
+const { checkReachable, makeLinkUploader, makeCredentialUploader } = await import(
+  `${pathToFileURL(resolve(here, "../seq2bucket/uploaders.js"))}?test=${Date.now()}`
 );
 
 function fakeTimers() {
@@ -65,7 +65,7 @@ test("a black-holed online preflight is classified as network and retried", asyn
   assert.equal(checking.length, 2);
   assert.equal(retries.length, 1);
   assert.equal(retries[0].waitingOnline, false);
-  assert.equal(retries[0].error.updeaconCause, "network");
+  assert.equal(retries[0].error.kind, "network");
   assert.deepEqual(sleeps, [60_000]);
   assert.equal(timers.size, 0);
 });
@@ -79,7 +79,7 @@ test("an immediate online preflight failure remains a terminal CORS diagnosis", 
         throw new TypeError("Failed to fetch");
       },
     }),
-    (err) => err.updeaconCause === "cors"
+    (err) => err.kind === "cors"
   );
 });
 
@@ -130,24 +130,108 @@ test("link upload checks combined spool capacity before pulling either mate", as
   assert.deepEqual(released, ["r1.bin", "r2.bin"]);
 });
 
+test("link upload posts whole Blobs directly, with no spool", async () => {
+  const posts = [];
+  const started = [];
+  const fail = (what) => async () => assert.fail(`${what} must not be called for raw bodies`);
+  const uploader = makeLinkUploader({
+    link: {
+      endpoint: "https://example.test",
+      bucket: "bucket",
+      maxBytes: 1000,
+      expiresAt: Date.now() + 60_000,
+      fields: { policy: "p" },
+    },
+    buildClientRecord: () => ({}),
+    humanBytes: String,
+    onStatus: () => {},
+    prepareSpoolFn: fail("prepareSpool"),
+    spoolToFileFn: fail("spoolToFile"),
+    releaseSpoolFn: fail("releaseSpool"),
+    postWithRetryFn: async (args) => posts.push([args.key, args.body, args.link.fields]),
+  });
+
+  const r1 = new Blob(["@r1\n"]);
+  const r2 = new Blob(["@r2\n"]);
+  const keys = await uploader.uploadGroup(
+    { kind: "paired", key: "p/r1.fastq", key2: "p/r2.fastq", file1: r1, file2: r2 },
+    { bodyR1: r1, bodyR2: r2 },
+    { onUploadStart: (n) => started.push(n), onUploadProgress: () => {} }
+  );
+
+  assert.deepEqual(keys, ["p/r1.fastq", "p/r2.fastq"]);
+  assert.equal(posts[0][1], r1);
+  assert.equal(posts[1][1], r2);
+  assert.equal(posts[0][2].policy, "p"); // fields go through verbatim
+  assert.deepEqual(started, [r1.size + r2.size]);
+});
+
+test("link upload enforces the per-file cap on a whole Blob's exact size", async () => {
+  const uploader = makeLinkUploader({
+    link: { endpoint: "e", bucket: "b", maxBytes: 3, expiresAt: Date.now() + 60_000, fields: {} },
+    buildClientRecord: () => ({}),
+    humanBytes: (n) => `${n}B`,
+    postWithRetryFn: async () => assert.fail("must not post an oversize body"),
+  });
+  const body = new Blob(["@toolong\n"]);
+  await assert.rejects(
+    uploader.uploadGroup(
+      { kind: "single", key: "p/a.fastq", file: body },
+      { body },
+      { onUploadStart: () => {}, onUploadProgress: () => {} }
+    ),
+    (err) => err.kind === "size" && /^a\.fastq is 9B/.test(err.message)
+  );
+});
+
+test("credential upload sends a whole Blob as the multipart Body", async () => {
+  const sent = [];
+  class Upload {
+    constructor({ params }) {
+      this.params = params;
+    }
+    on() {}
+    async done() {
+      sent.push([this.params.Key, this.params.Body]);
+    }
+  }
+  const uploader = makeCredentialUploader({
+    accessKeyId: "a",
+    secretAccessKey: "s",
+    bucket: "b",
+    endpoint: "e",
+    region: "r",
+    loadSdk: async () => ({ Upload, S3Client: class {} }),
+    checkReachableFn: async () => {},
+  });
+  await uploader.preflight("p");
+  const body = new Blob(["@r\n"]);
+  const started = [];
+  await uploader.uploadGroup(
+    { kind: "single", key: "p/a.fastq", file: body },
+    { body },
+    { onUploadStart: (n) => started.push(n), onUploadProgress: () => {} }
+  );
+  assert.deepEqual(sent.at(-1), ["p/a.fastq", body]);
+  assert.deepEqual(started, [body.size]);
+});
+
 test("the source module graph uses one cache token", async () => {
-  const paths = [
-    "../index.html",
-    "../app.js",
-    "../uploaders.js",
-    "../worker.js",
-    "../sapiometer/index.html",
-    "../sapiometer.js",
-  ];
+  // Every app source file outside pkg/, vendor/ and tests/
+  const root = resolve(here, "..");
+  const paths = [];
+  for (const dir of [root, resolve(root, "seq2bucket"), resolve(root, "sapiometer")]) {
+    for (const name of await readdir(dir)) {
+      if (/\.(js|html|css)$/.test(name)) paths.push(resolve(dir, name));
+    }
+  }
   const tokens = [];
   for (const path of paths) {
-    const text = await readFile(resolve(here, path), "utf8");
+    const text = await readFile(path, "utf8");
     tokens.push(
-      ...[...text.matchAll(/(?:ASSET_VERSION = "|[?]v=)([0-9]{8}-[0-9]{6})/g)].map(
-        (m) => m[1]
-      )
+      ...[...text.matchAll(/(?:ASSET_VERSION = "|[?]v=)([0-9]{8}-[0-9]{6})/g)].map((m) => m[1])
     );
   }
-  assert.ok(tokens.length >= 10);
+  assert.ok(tokens.length >= 30, `only ${tokens.length} tokens found`);
   assert.equal(new Set(tokens).size, 1);
 });

@@ -34,22 +34,16 @@ for f in "${FILES[@]}"; do
   echo "  synced $f"
 done
 
-# Stamp a fresh cache-bust version into the app so browsers never serve a stale
-# worker/WASM against the bundle we just synced. This used to be a manual step
-# (easy to forget); now every sync regenerates it. The token is opaque — nothing
-# parses it — so a sync-time timestamp guarantees a new value each run.
+# Stamp a fresh cache-bust version into every app source file so browsers never serve
+# a stale worker/WASM against the bundle we just synced. The token is opaque (nothing
+# parses it), so a sync-time timestamp guarantees a new value each run.
 ROOT="$(dirname "$DEST_PKG")"
 VERSION="$(date +%Y%m%d-%H%M%S)"
-for f in app.js worker.js sapiometer.js; do
-  perl -i -pe "s/(ASSET_VERSION\s*=\s*\")[^\"]*(\")/\${1}${VERSION}\${2}/g; \
-               s/(protocol\.js\?v=)[^\"]*/\${1}${VERSION}/g; \
-               s/(presign\.js\?v=)[^\"]*/\${1}${VERSION}/g; \
-               s/(pairing\.js\?v=)[^\"]*/\${1}${VERSION}/g; \
-               s/(uploaders\.js\?v=)[^\"]*/\${1}${VERSION}/g" "$ROOT/$f"
-done
-perl -i -pe "s/([?]v=)[^\"]*/\${1}${VERSION}/g" "$ROOT/index.html" "$ROOT/sapiometer/index.html"
-perl -i -pe "s/(presign\.js\?v=)[^\"]*/\${1}${VERSION}/g" "$ROOT/uploaders.js"
-echo "  stamped cache-bust version $VERSION into app.js, worker.js and sapiometer.js"
+while IFS= read -r f; do
+  perl -i -pe "s/(ASSET_VERSION\s*=\s*\"|[?]v=)[0-9]{8}-[0-9]{6}/\${1}${VERSION}/g" "$f"
+done < <(find "$ROOT" -maxdepth 2 \( -name '*.js' -o -name '*.html' -o -name '*.css' \) \
+           -not -path "$ROOT/pkg/*" -not -path "$ROOT/tests/*" -not -path "*/vendor/*")
+echo "  stamped cache-bust version $VERSION into the app sources"
 
 SRC_HASH="$(git -C "$SRC_REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo "Synced Deacon WASM from $SRC_REPO (deacon @ $SRC_HASH) into $DEST_PKG"
