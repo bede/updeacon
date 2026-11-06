@@ -35,7 +35,7 @@ scripts/mint-magic-link.py inrb-batch3 --raw --profile climb --endpoint https://
 
 ## Bucket CORS
 
-The bucket must allow `PUT`/`POST` from the page's origin and expose `ETag`. Apply [`cors.json`](cors.json) with `sh set-cors.sh` (set `AWS_ENDPOINT_URL=https://s3.climb.ac.uk` for CLIMB), and narrow `AllowedOrigins` from `*` in production.
+This is an important prerequisite for using Updeacon and the most common cause of upload failures. The bucket must be configured to allow `PUT`/`POST` from the page's origin and expose `ETag`. Apply [`cors.json`](cors.json) with `sh set-cors.sh` (set `AWS_ENDPOINT_URL=https://s3.climb.ac.uk` for CLIMB).
 
 ## Development
 

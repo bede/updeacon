@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const { checkReachable, makeLinkUploader, makeCredentialUploader } = await import(
+const { checkReachable, makeLinkUploader, makeCredentialUploader, normaliseEndpoint } = await import(
   `${pathToFileURL(resolve(here, "../seq2bucket/uploaders.js"))}?test=${Date.now()}`
 );
 
@@ -214,6 +214,41 @@ test("credential upload sends a whole Blob as the multipart Body", async () => {
   );
   assert.deepEqual(sent.at(-1), ["p/a.fastq", body]);
   assert.deepEqual(started, [body.size]);
+});
+
+test("a server address without a scheme gets https://", () => {
+  assert.equal(normaliseEndpoint("s3.climb.ac.uk"), "https://s3.climb.ac.uk");
+  assert.equal(normaliseEndpoint(" https://s3.climb.ac.uk/ "), "https://s3.climb.ac.uk");
+  assert.equal(normaliseEndpoint("http://localhost:9000"), "http://localhost:9000");
+  assert.equal(normaliseEndpoint("https://"), ""); // the untouched prefill
+  assert.equal(normaliseEndpoint(""), "");
+});
+
+function failingCredentialUploader(error) {
+  class Upload {
+    on() {}
+    async done() {
+      throw error;
+    }
+  }
+  return makeCredentialUploader({
+    accessKeyId: "a",
+    secretAccessKey: "s",
+    bucket: "b",
+    endpoint: "https://e",
+    loadSdk: async () => ({ Upload, S3Client: class {} }),
+    checkReachableFn: async () => {},
+  });
+}
+
+test("a 403 on the credentials check is a credentials error", async () => {
+  const err = Object.assign(new Error("Access Denied"), { $metadata: { httpStatusCode: 403 } });
+  await assert.rejects(failingCredentialUploader(err).preflight("p"), (e) => e.kind === "credentials");
+});
+
+test("other credentials-check failures keep their own cause", async () => {
+  const err = new TypeError("Invalid URL");
+  await assert.rejects(failingCredentialUploader(err).preflight("p"), (e) => e === err && e.kind === undefined);
 });
 
 test("the source module graph uses one cache token", async () => {
