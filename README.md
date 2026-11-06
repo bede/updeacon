@@ -16,33 +16,27 @@ Magic links work using a presigned S3 POST policy authorising uploads anywhere u
 **From the command line**, use an AWS CLI profile that can write to the bucket and run:
 
 ```sh
-scripts/mint-magic-link.py test-upload --profile climb --endpoint https://s3.climb.ac.uk
+scripts/mint-magic-link.sh test-upload --profile climb --endpoint https://s3.climb.ac.uk
 ```
 
-Other flags: `--days`, `--max-bytes`, `--bucket`, `--base-url`.
+Uploads go under `updeacon/<name>-<suffix>/` in the bucket. Other flags: `--days`, `--max-bytes`, `--bucket`, `--page`.
 
 Anyone with a magic link can upload to its target bucket prefix until either the request itself or the credentials associated with it expire or are revoked.
 
-## seq2bucket
+## sssender
 
-[seq2bucket](bede.im/seq2bucket) uploads FASTA/Q files to S3-compatible storage unmodified, without human read removal. It works the same way as Updeacon, with manual credentials or a magic link, and is the shared upload layer that Updeacon is built upon.
-
-Uploads go under a `raw/` prefix, away from data assumed to be human-depleted. Magic links for seq2bucket are created the same two ways: from *mint magic link* at the bottom of the seq2bucket page (`/seq2bucket/mint.html`), or with `--raw`:
-
-```sh
-scripts/mint-magic-link.py inrb-batch3 --raw --profile climb --endpoint https://s3.climb.ac.uk
-```
+Updeacon is built on [sssender](https://github.com/bede/sssender), which uploads any files to S3-compatible storage unmodified ([bede.im/sssender](https://bede.im/sssender/)). sssender replaces seq2bucket. Each app keeps its uploads under its own directory in the bucket (`updeacon/`, `sssender/`), so they never clash. sssender is vendored into [`sssender/`](sssender/).
 
 ## Bucket CORS
 
-This is an important prerequisite for using Updeacon and the most common cause of upload failures. The bucket must be configured to allow `PUT`/`POST` from the page's origin and expose `ETag`. Apply [`cors.json`](cors.json) with `sh set-cors.sh` (set `AWS_ENDPOINT_URL=https://s3.climb.ac.uk` for CLIMB).
+This is an important prerequisite for using Updeacon and the most common cause of upload failures. The bucket must be configured to allow `PUT`/`POST` from the page's origin and expose `ETag`. Apply [`cors.json`](sssender/cors.json) with `sh set-cors.sh` (set `AWS_ENDPOINT_URL=https://s3.climb.ac.uk` for CLIMB).
 
 ## Development
 
 ```sh
-python3 -m http.server 8000                                   # then open /, /seq2bucket/ or /sapiometer/
-scripts/mint-magic-link.py smoke --base-url http://localhost:8000
+python3 -m http.server 8000                                   # then open / or /sapiometer/
+scripts/mint-magic-link.sh smoke --page http://localhost:8000
 node --test "tests/*.test.mjs"
 ```
 
-`scripts/deploy.sh` copies the apps into the `bede.github.io` site and pushes. `scripts/sync-wasm.sh` updates the Deacon bundle in `pkg/` from `../deacon`. The release version is in [`seq2bucket/version.js`](seq2bucket/version.js).
+`scripts/deploy.sh` copies the apps into the `bede.github.io` site and pushes. `scripts/sync-wasm.sh` updates the Deacon bundle in `pkg/` from `../deacon`. `scripts/sync-sssender.sh` vendors sssender from `../sssender`. The release version is in [`version.js`](version.js).

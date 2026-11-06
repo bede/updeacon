@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # Deploy the apps to the Jekyll blog (bede.github.io) as standalone static apps:
-#   /updeacon-s3/  filter with Deacon, then upload (keeps seq2bucket/ as a subdir)
-#   /seq2bucket/   upload without filtering (seq2bucket/ flattened)
+#   /updeacon-s3/  filter with Deacon, then upload (vendored sssender/ inside)
 #   /sapiometer/   human-content check, no upload
-# No build step — pkg/ (Deacon WASM) and seq2bucket/vendor/ (AWS SDK) are prebuilt.
+# No build step. pkg/ (Deacon WASM) and sssender/ are prebuilt.
 set -euo pipefail
 
-SRC="/Users/bede/Research/git/updeacon"
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PAGES_ROOT="${PAGES_ROOT:-/Users/bede/Research/git/bede.github.io}"
 
 SOURCE_HASH="$(git -C "$SRC" rev-parse --short HEAD)"
@@ -16,65 +15,43 @@ if [[ -n "$(git -C "$SRC" status --porcelain)" ]]; then
   SOURCE_HASH="$SOURCE_HASH-dirty-$(date -u +%Y%m%d%H%M%S)"
 fi
 
-# Self-hosted fonts and their licenses, shared by all three apps
-SEQ2BUCKET_FONTS=(
-  fonts.css
-  fonts/geist-latin.woff2
-  fonts/geist-latin-ext.woff2
-  fonts/geist-mono-latin.woff2
-  fonts/geist-mono-latin-ext.woff2
-  fonts/fraunces-latin.woff2
-  fonts/fraunces-latin-ext.woff2
-  fonts/OFL.txt
-)
-
 # Each app's file set (paths relative to its deployed dir) is the single source of
 # truth: files copied, stamped, staged and pruned all derive from it, so a rename in
 # SRC can't leave an orphaned copy behind in the deployed app.
-SEQ2BUCKET_LIB=(
-  link.js
-  post.js
-  spool.js
-  uploaders.js
-  pairing.js
-  pipeline.js
-  ui.js
-  version.js
-  style.css
-  mint.js
-  mint-page.js
-  "${SEQ2BUCKET_FONTS[@]}"
+
+# The vendored sssender, as sync-sssender.sh left it
+SSSENDER_LIB=()
+while IFS= read -r f; do SSSENDER_LIB+=("sssender/$f"); done < <(
+  cd "$SRC/sssender" && find core ui vendor -type f ! -name .DS_Store | sort
 )
+SSSENDER_FONTS=()
+for f in "${SSSENDER_LIB[@]}"; do
+  case "$f" in sssender/ui/fonts.css|sssender/ui/fonts/*) SSSENDER_FONTS+=("$f") ;; esac
+done
 
 UPDEACON_FILES=(
   index.html
   mint.html
   app.js
   deacon.js
+  pairing.js
+  version.js
   worker.js
   protocol.js
   pkg/deacon_wasm.js
   pkg/deacon_wasm_bg.wasm
-  "${SEQ2BUCKET_LIB[@]/#/seq2bucket/}"
-  seq2bucket/vendor/aws-sdk.js
+  "${SSSENDER_LIB[@]}"
 )
 
-SEQ2BUCKET_FILES=(
-  index.html
-  mint.html
-  page.js
-  "${SEQ2BUCKET_LIB[@]}"
-  vendor/aws-sdk.js
-)
-
-# sapiometer/index.html references ../sapiometer.js and ../seq2bucket/; deployed, both sit beside it
+# sapiometer/index.html refers to ../sapiometer.js and ../sssender/. Deployed, both sit beside it
 SAPIO_FILES=(
   index.html
   sapiometer.js
   worker.js
   protocol.js
-  seq2bucket/pairing.js
-  "${SEQ2BUCKET_FONTS[@]/#/seq2bucket/}"
+  pairing.js
+  sssender/core/select.js
+  "${SSSENDER_FONTS[@]}"
   pkg/deacon_wasm.js
   pkg/deacon_wasm_bg.wasm
 )
@@ -104,13 +81,9 @@ copy_app "$SRC" "$PAGES_ROOT/updeacon-s3" "${UPDEACON_FILES[@]}"
 stamp "$PAGES_ROOT/updeacon-s3" "${UPDEACON_FILES[@]}"
 echo "Deployed to $PAGES_ROOT/updeacon-s3"
 
-copy_app "$SRC/seq2bucket" "$PAGES_ROOT/seq2bucket" "${SEQ2BUCKET_FILES[@]}"
-stamp "$PAGES_ROOT/seq2bucket" "${SEQ2BUCKET_FILES[@]}"
-echo "Deployed to $PAGES_ROOT/seq2bucket"
-
 mkdir -p "$PAGES_ROOT/sapiometer"
 cp "$SRC/sapiometer/index.html" "$PAGES_ROOT/sapiometer/index.html"
-sed -i '' 's#\.\./sapiometer\.js#./sapiometer.js#; s#\.\./seq2bucket/#./seq2bucket/#' "$PAGES_ROOT/sapiometer/index.html"
+sed -i '' 's#\.\./sapiometer\.js#./sapiometer.js#; s#\.\./sssender/#./sssender/#' "$PAGES_ROOT/sapiometer/index.html"
 copy_app "$SRC" "$PAGES_ROOT/sapiometer" "${SAPIO_FILES[@]:1}"
 stamp "$PAGES_ROOT/sapiometer" "${SAPIO_FILES[@]}"
 echo "Deployed to $PAGES_ROOT/sapiometer"
@@ -135,7 +108,6 @@ prune_and_stage() {
 }
 
 prune_and_stage updeacon-s3 "${UPDEACON_FILES[@]}"
-prune_and_stage seq2bucket "${SEQ2BUCKET_FILES[@]}"
 prune_and_stage sapiometer "${SAPIO_FILES[@]}"
 
 if git diff --cached --quiet; then

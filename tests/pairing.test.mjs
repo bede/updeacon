@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const source = await readFile(resolve(here, "../seq2bucket/pairing.js"), "utf8");
-const pairing = await import(`data:text/javascript,${encodeURIComponent(source)}`);
-const { pairSequenceFiles, describeGroups } = pairing;
+const { pairSequenceFiles, describeGroups } = await import(
+  `${pathToFileURL(resolve(here, "../pairing.js"))}?test=${Date.now()}`
+);
+// sssender groups have no kind. A pair is a two-file group
+const kind = (g) => (g.files.length === 2 ? "paired" : "single");
 
 function file(path, size = 1) {
   const name = path.split("/").pop();
@@ -20,25 +21,27 @@ test("pairs standard Illumina R1/R2 filenames in the same directory", () => {
     file("run/sample_S1_L001_R2_001.fastq.gz"),
   ]);
   assert.equal(groups.length, 1);
-  assert.equal(groups[0].kind, "paired");
-  assert.equal(groups[0].file1.name, "sample_S1_L001_R1_001.fastq.gz");
-  assert.equal(groups[0].file2.name, "sample_S1_L001_R2_001.fastq.gz");
+  assert.equal(kind(groups[0]), "paired");
+  assert.deepEqual(groups[0].files.map((f) => f.name), [
+    "sample_S1_L001_R1_001.fastq.gz",
+    "sample_S1_L001_R2_001.fastq.gz",
+  ]);
 });
 
 test("keeps unpaired filenames as single-end groups", () => {
   const groups = pairSequenceFiles([file("run/reads.fastq.gz")]);
-  assert.deepEqual(groups.map((g) => g.kind), ["single"]);
+  assert.deepEqual(groups.map(kind), ["single"]);
 });
 
 test("does not treat sample or lane numbers as mate tokens", () => {
   const groups = pairSequenceFiles([file("run/sample_S1_L001.fastq.gz")]);
-  assert.deepEqual(groups.map((g) => g.kind), ["single"]);
+  assert.deepEqual(groups.map(kind), ["single"]);
 });
 
 test("pairs simple trailing _1/_2 filenames", () => {
   const groups = pairSequenceFiles([file("run/reads_1.fq.gz"), file("run/reads_2.fq.gz")]);
   assert.equal(groups.length, 1);
-  assert.equal(groups[0].kind, "paired");
+  assert.equal(kind(groups[0]), "paired");
 });
 
 test("does not pair _1/_2 when other numbered chunks share the prefix (ONT)", () => {
@@ -50,7 +53,7 @@ test("does not pair _1/_2 when other numbered chunks share the prefix (ONT)", ()
     file("run/barcode02_10.fastq"),
   ]);
   assert.deepEqual(
-    groups.map((g) => g.kind),
+    groups.map(kind),
     ["single", "single", "single", "single", "single"]
   );
 });
@@ -86,8 +89,8 @@ test("rejects duplicate mates", () => {
 });
 
 test("describeGroups names pairs and files, never conflating them", () => {
-  const pair = { kind: "paired" };
-  const single = { kind: "single" };
+  const pair = { files: [1, 2] };
+  const single = { files: [1] };
   assert.equal(describeGroups([pair]), "1 pair");
   assert.equal(describeGroups([pair, pair]), "2 pairs");
   assert.equal(describeGroups([single]), "1 file");

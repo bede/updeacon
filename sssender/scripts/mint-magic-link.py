@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mint a magic link: a presigned upload link for updeacon-s3 or seq2bucket.
+"""Mint a magic link: a presigned upload link for sssender or an app built on it.
 
 Signs an S3 POST policy whose `starts-with` condition on `$key` authorises uploads
 anywhere under a prefix, and packs it into the URL fragment of the upload page.
@@ -12,11 +12,12 @@ Needs the AWS CLI configured for the target bucket. The S3 endpoint comes from
 
 For CLIMB:
 
-    scripts/mint-magic-link.py inrb-batch3 --profile climb --endpoint https://s3.climb.ac.uk
+    scripts/mint-magic-link.py inrb-batch3 --bucket my-bucket --profile climb --endpoint https://s3.climb.ac.uk
 
---raw mints a link to the seq2bucket page, which uploads files with no human
-depletion, under a raw/ prefix. Without it, the link opens updeacon-s3, which
-filters with Deacon first. The page decides the behaviour; the policy is the same.
+The link opens --page (default: sssender) and authorises uploads under
+<root><name>-<suffix>/. Each app has its own --root (default: sssender/), so apps
+sharing a bucket never clash. The policy fixes only where files go; the page decides
+the rest. Apps wrap this script with their own --page and --root.
 """
 
 import argparse
@@ -31,17 +32,17 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 
-BUCKET = "cli-artic-drc-co-inrb-uploads"
-REGION = "us-east-1"  # dummy; Ceph RGW ignores it but it must match the signature
-BASE_URL = "https://bede.im/updeacon-s3/"  # filters with Deacon, then uploads
-RAW_BASE_URL = "https://bede.im/seq2bucket/"  # uploads files without filtering
+DEFAULT_REGION = "us-east-1"  # non-AWS stores (Ceph RGW, MinIO) ignore it
+AWS_ENDPOINT_RE = re.compile(r"^https?://(?:[^/]+\.)?s3[.-](?:dualstack\.)?([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?(?:[:/]|$)", re.I)
+PAGE_URL = "https://bede.im/sssender/"
+DEFAULT_ROOT = "sssender/"  # keep in step with DEFAULT_ROOT in core/mint.js
+ROOT_RE = re.compile(r"([a-z0-9][a-z0-9._-]*/)+")
 
 ALGORITHM = "AWS4-HMAC-SHA256"
 POST_MAX_BYTES = 5 * 1024**3  # S3 POST Object caps a single upload at 5 GB
 MAX_DAYS = 7  # SigV4 signatures are invalid beyond 604800 s
 SUFFIX_LETTERS = "abcdefghijklmnopqrstuvwxyz"
 SUFFIX_DIGITS = "0123456789"
-RAW_ROOT = "raw/"  # keeps unfiltered uploads out of paths assumed to be human-depleted
 
 
 def _hmac(key: bytes, msg: str) -> bytes:
@@ -63,12 +64,29 @@ def sanitise(name: str) -> str:
     return slug
 
 
-def make_prefix(name: str, raw: bool = False) -> str:
-    """The suffix avoids collisions, not guessing; the signature is the secret."""
+def region_for_endpoint(endpoint: str) -> str:
+    """SigV4 region: from an AWS endpoint, else us-east-1. Keep in step with core/mint.js."""
+    m = AWS_ENDPOINT_RE.match(endpoint or "")
+    if not m or m.group(1) == "external-1":
+        return DEFAULT_REGION
+    return m.group(1)
+
+
+def check_root(root: str) -> str:
+    """Lower-case path segments, each ending in '/'."""
+    if not ROOT_RE.fullmatch(root or ""):
+        raise SystemExit(f"error: invalid --root {root!r}: expected e.g. {DEFAULT_ROOT!r}")
+    return root
+
+
+def make_prefix(name: str, root: str = DEFAULT_ROOT) -> str:
+    """<root><name>-<suffix>/. The suffix avoids collisions, not guessing; the
+    signature is the secret."""
+    check_root(root)
     suffix = "".join(
         secrets.choice(SUFFIX_LETTERS if i % 2 == 0 else SUFFIX_DIGITS) for i in range(4)
     )
-    return f"{RAW_ROOT if raw else ''}{sanitise(name)}-{suffix}/"
+    return f"{root}{sanitise(name)}-{suffix}/"
 
 
 def resolve_credentials(profile, allow_session_token):
@@ -157,7 +175,7 @@ def build_policy(bucket, prefix, region, access_key, session_token, expires_at, 
 
 def sign_policy(fields, secret, datestamp, region, encoded_policy):
     key = signing_key(secret, datestamp, region, "s3")
-    # No canonical request; the base64 policy is the string to sign
+    # No canonical request. The base64 policy is the string to sign
     fields["x-amz-signature"] = hmac.new(
         key, encoded_policy.encode("utf-8"), hashlib.sha256
     ).hexdigest()
@@ -180,7 +198,7 @@ def self_test():
 
     # A round-trip the browser must decode
     prefix = make_prefix("Smoke Test!!")
-    if not re.fullmatch(r"smoke-test-([a-z][0-9]){2}/", prefix):
+    if not re.fullmatch(r"sssender/smoke-test-([a-z][0-9]){2}/", prefix):
         print(f"FAIL prefix shape: {prefix}", file=sys.stderr)
         return 1
 
@@ -195,10 +213,20 @@ def self_test():
     assert policy["expiration"] == "2026-07-16T14:22:00Z"
     assert len(fields["x-amz-signature"]) == 64
 
-    raw_prefix = make_prefix("Smoke Test!!", raw=True)
-    if not re.fullmatch(r"raw/smoke-test-([a-z][0-9]){2}/", raw_prefix):
-        print(f"FAIL raw prefix shape: {raw_prefix}", file=sys.stderr)
+    app_prefix = make_prefix("Smoke Test!!", root="someapp/")
+    if not re.fullmatch(r"someapp/smoke-test-([a-z][0-9]){2}/", app_prefix):
+        print(f"FAIL app prefix shape: {app_prefix}", file=sys.stderr)
         return 1
+
+    for endpoint, want in [
+        ("https://s3.eu-west-2.amazonaws.com", "eu-west-2"),
+        ("https://s3.dualstack.ap-south-1.amazonaws.com", "ap-south-1"),
+        ("https://s3.amazonaws.com", DEFAULT_REGION),
+        ("https://s3.climb.ac.uk", DEFAULT_REGION),
+    ]:
+        if region_for_endpoint(endpoint) != want:
+            print(f"FAIL region for {endpoint}: {region_for_endpoint(endpoint)}", file=sys.stderr)
+            return 1
 
     print("self-test ok")
     return 0
@@ -208,21 +236,24 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("name", nargs="?", help="human label for the upload; a random suffix is appended")
     p.add_argument("--profile", help="AWS CLI profile to sign with")
-    p.add_argument("--bucket", default=BUCKET)
+    p.add_argument("--bucket", help="bucket to upload into (required)")
     p.add_argument("--endpoint", help="S3 endpoint URL (default: from the AWS CLI config)")
-    p.add_argument("--region", default=REGION)
+    p.add_argument("--region", help="bucket region (default: from an AWS --endpoint, else us-east-1)")
     p.add_argument(
+        "--page",
         "--base-url",
-        help=f"page the link opens (default: {BASE_URL}, or {RAW_BASE_URL} with --raw)",
+        dest="page",
+        default=PAGE_URL,
+        help=f"upload page the link opens (default: {PAGE_URL})",
+    )
+    p.add_argument(
+        "--root",
+        default=DEFAULT_ROOT,
+        help=f"the app's upload root inside the bucket (default: {DEFAULT_ROOT})",
     )
     p.add_argument("--days", type=int, default=MAX_DAYS, help=f"link lifetime (max {MAX_DAYS})")
     p.add_argument("--max-bytes", type=int, default=POST_MAX_BYTES, help="per-object size cap")
     p.add_argument("--allow-session-token", action="store_true")
-    p.add_argument(
-        "--raw",
-        action="store_true",
-        help="link to seq2bucket: upload files WITHOUT human depletion (prefix under raw/)",
-    )
     p.add_argument("--self-test", action="store_true", help="verify signing against AWS test vectors")
     args = p.parse_args()
 
@@ -230,6 +261,9 @@ def main():
         raise SystemExit(self_test())
     if not args.name:
         p.error("an upload name is required, e.g. `mint-magic-link.py inrb-batch3`")
+    if not args.bucket:
+        p.error("--bucket is required")
+    check_root(args.root)
     if not 1 <= args.days <= MAX_DAYS:
         p.error(f"--days must be between 1 and {MAX_DAYS} (SigV4 signatures cannot outlive 7 days)")
     if not 1 <= args.max_bytes <= POST_MAX_BYTES:
@@ -237,37 +271,32 @@ def main():
 
     endpoint, endpoint_source = resolve_endpoint(args.endpoint, args.profile)
     access_key, secret, token = resolve_credentials(args.profile, args.allow_session_token)
+    region = args.region or region_for_endpoint(endpoint)
 
     now = datetime.now(timezone.utc).replace(microsecond=0)
     expires_at = now + timedelta(days=args.days)
-    prefix = make_prefix(args.name, raw=args.raw)
+    prefix = make_prefix(args.name, root=args.root)
 
     fields, datestamp, encoded = build_policy(
-        args.bucket, prefix, args.region, access_key, token, expires_at, now, args.max_bytes
+        args.bucket, prefix, region, access_key, token, expires_at, now, args.max_bytes
     )
-    sign_policy(fields, secret, datestamp, args.region, encoded)
+    sign_policy(fields, secret, datestamp, region, encoded)
 
     payload = {"v": 1, "endpoint": endpoint, "fields": fields}
     blob = b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    base_url = args.base_url or (RAW_BASE_URL if args.raw else BASE_URL)
-    link = f"{base_url.rstrip('/')}/#u={blob}"
+    link = f"{args.page.rstrip('/')}/#u={blob}"
 
     print(f"endpoint {endpoint} ({endpoint_source})")
-    print(f"bucket   {args.bucket}")
+    print(f"bucket   {args.bucket} ({region})")
     print(f"prefix   {prefix}")
     print(f"expires  {expires_at.strftime('%Y-%m-%dT%H:%M:%SZ')} ({args.days} days)")
     print(f"max size {args.max_bytes / 1024**3:.1f} GB per file")
-    print(f"page     {base_url} ({'raw: NO human depletion' if args.raw else 'Deacon filtering'})")
+    print(f"page     {args.page}")
     print()
     print(link)
     print()
     print("Anyone with this link can upload into that prefix until it expires.", file=sys.stderr)
     print("They cannot list, read or delete anything. Share it like a password.", file=sys.stderr)
-    if args.raw:
-        print(
-            "RAW LINK: files are uploaded without filtering. Human reads are NOT removed.",
-            file=sys.stderr,
-        )
 
 
 if __name__ == "__main__":

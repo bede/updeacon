@@ -41,8 +41,8 @@ def parse_link(url: str):
 
 
 def post_object(endpoint, bucket, fields, key, body):
-    """Mirrors seq2bucket/post.js: key first, file last, fields verbatim."""
-    boundary = f"----updeacon{secrets.token_hex(8)}"
+    """Mirrors core/post.js: key first, file last, fields verbatim."""
+    boundary = f"----sssender{secrets.token_hex(8)}"
     parts = []
 
     def field(name, value):
@@ -90,7 +90,7 @@ def main():
     failures = 0
     probe = f"{prefix}_LINK_CHECK.txt"
 
-    status, err = post_object(endpoint, bucket, fields, probe, b"updeacon link check\n")
+    status, err = post_object(endpoint, bucket, fields, probe, b"sssender link check\n")
     if status in (200, 201, 204):
         print(f"  ok   object store accepted the POST policy ({status}) -> {probe}")
     else:
@@ -112,7 +112,7 @@ def main():
     if failures:
         print(f"{failures} check(s) failed")
     else:
-        print("all checks passed — the link works and the prefix is enforced")
+        print("all checks passed, the link works and the prefix is enforced")
         print(f"remove the probe with:\n  aws s3 rm s3://{bucket}/{probe} --endpoint-url {endpoint}")
     return 1 if failures else 0
 

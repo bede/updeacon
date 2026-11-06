@@ -1,13 +1,12 @@
+// Sequence files grouped for sssender: R1/R2 mates as one two-file group, others alone
+import { relativePath } from "./sssender/core/select.js?v=20261106-145929";
+
 export const SEQ_RE = /\.(fastq|fq|fasta|fa)(\.gz)?$/i;
 
 const MATE_PATTERNS = [
   /(^|[._])R([12])(?=([._-]|$))/i,
   /(_)([12])$/,
 ];
-
-function relativePath(file) {
-  return file.webkitRelativePath || file.name;
-}
 
 function splitPath(path) {
   const idx = path.lastIndexOf("/");
@@ -57,6 +56,9 @@ function numericSiblingSets(seqs) {
   return sets;
 }
 
+export const isPaired = (group) => group.files.length === 2;
+
+// -> sssender groups, files = [r1, r2] for a pair. Throws on an ambiguous or incomplete pair
 export function pairSequenceFiles(files) {
   const seqs = files.filter((file) => SEQ_RE.test(file.name));
   const numericSiblings = numericSiblingSets(seqs);
@@ -71,7 +73,7 @@ export function pairSequenceFiles(files) {
     }
     if (info.bareDigit) {
       // Only pair bare _1/_2 when they are the *only* numbered files sharing this
-      // prefix; any other number (_3, _4) means these are treated as ONT.
+      // prefix. Any other number (_3, _4) means these are treated as ONT.
       const numbers = numericSiblings.get(info.key.replace("{mate}", ""));
       const onlyMates = numbers && [...numbers].every((n) => n === 1 || n === 2);
       if (!onlyMates) {
@@ -85,10 +87,9 @@ export function pairSequenceFiles(files) {
   }
 
   const groups = singles.map((file) => ({
-    kind: "single",
-    file,
     label: relativePath(file),
     size: file.size || 0,
+    files: [file],
   }));
 
   for (const [key, bucket] of pairBuckets) {
@@ -99,11 +100,9 @@ export function pairSequenceFiles(files) {
     const file1 = bucket.r1[0];
     const file2 = bucket.r2[0];
     groups.push({
-      kind: "paired",
-      file1,
-      file2,
       label: `${relativePath(file1)} & ${relativePath(file2)}`,
       size: (file1.size || 0) + (file2.size || 0),
+      files: [file1, file2],
     });
   }
 
@@ -113,23 +112,10 @@ export function pairSequenceFiles(files) {
 
 // Count work groups the way a user sees them: "1 pair", "2 files", "1 pair and 2 files"
 export function describeGroups(groups) {
-  const pairs = groups.filter((group) => group.kind === "paired").length;
+  const pairs = groups.filter(isPaired).length;
   const files = groups.length - pairs;
   const parts = [];
   if (pairs) parts.push(`${pairs} pair${pairs === 1 ? "" : "s"}`);
   if (files) parts.push(`${files} file${files === 1 ? "" : "s"}`);
   return parts.join(" and ") || "0 files";
-}
-
-export function groupRelativePaths(group) {
-  if (group.kind === "paired") {
-    return {
-      input: relativePath(group.file1),
-      input2: relativePath(group.file2),
-    };
-  }
-  return {
-    input: relativePath(group.file),
-    input2: null,
-  };
 }

@@ -34,16 +34,8 @@ for f in "${FILES[@]}"; do
   echo "  synced $f"
 done
 
-# Stamp a fresh cache-bust version into every app source file so browsers never serve
-# a stale worker/WASM against the bundle we just synced. The token is opaque (nothing
-# parses it), so a sync-time timestamp guarantees a new value each run.
-ROOT="$(dirname "$DEST_PKG")"
-VERSION="$(date +%Y%m%d-%H%M%S)"
-while IFS= read -r f; do
-  perl -i -pe "s/(ASSET_VERSION\s*=\s*\"|[?]v=)[0-9]{8}-[0-9]{6}/\${1}${VERSION}/g" "$f"
-done < <(find "$ROOT" -maxdepth 2 \( -name '*.js' -o -name '*.html' -o -name '*.css' \) \
-           -not -path "$ROOT/pkg/*" -not -path "$ROOT/tests/*" -not -path "*/vendor/*")
-echo "  stamped cache-bust version $VERSION into the app sources"
+# Fresh cache token, so browsers never serve a stale worker or WASM
+"$(dirname "${BASH_SOURCE[0]}")/stamp-cache-token.sh"
 
 SRC_HASH="$(git -C "$SRC_REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo "Synced Deacon WASM from $SRC_REPO (deacon @ $SRC_HASH) into $DEST_PKG"
