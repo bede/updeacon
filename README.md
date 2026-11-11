@@ -1,11 +1,11 @@
 # Updeacon
 
-[Updeacon](bede.im/updeacon-s3) seamlessly decontaminates and uploads FASTA/Q files to S3-compatible storage simply by dragging and dropping files into a web browser, facilitating privacy-preserving genomic data sharing. By default, Updeacon depletes human sequences before uploading the remaining sequences directly to a specified S3 bucket inside a timestamped directory. Updeacon communicates exclusively with the chosen S3 bucket and requires no third party trust. Updeacon was developed to facilitate responsible data sharing across international borders and engineered to work over unstable internet connections. Using hardware-accelerated WebAssembly, Updeacon is capable of decontaminating sequences at up to 100 Mbp/s.
+[Updeacon](bede.im/updeacon-s3) seamlessly removes human sequences and uploads FASTA/Q files to S3-compatible storage simply by dragging and dropping files into a web browser, facilitating privacy-preserving genomic data sharing. Use it either to send files to a bucket for which you have credentials, or to receive files by generating a pre-authenticated *magic link* to share with the sender, valid for up to 7 days. Updeacon communicates securely and exclusively with the chosen S3 bucket directly from your browser, requiring no third party trust. Updeacon was developed to facilitate responsible data sharing across international borders and engineered to work over unstable internet connections. Using hardware-accelerated WebAssembly, Updeacon is capable of decontaminating sequences at more than 100 Mbp/s, meaning it is typically limited by internet bandwidth. Updeacon uploads a json summary file alongside each uploaded FASTA/Q file detailing the number of retained and discarded bases and records. Updeacon is built from [deacon](https://github.com/bede/deacon) and [sssender](https://github.com/bede/sssender).
 
 **Updeacon may be used in two ways:**
 
 1. **Manual mode** in which S3 bucket credentials are entered manually.
-2. **Magic link mode**, in which the receiving party generates a pre-authenticated Updeacon URL and shares it with the receiving party. This URL grants upload permission only to a specific prefix in the bucket, and is valid for up to 7 days.
+2. **Magic link mode**, in which the receiving party generates a pre-authenticated Updeacon URL and shares it with the sending party. This URL grants upload permission only to a specific prefix in the bucket, and is valid for up to 7 days.
 
 ## Creating a magic link as the receiving party
 
@@ -23,20 +23,14 @@ Uploads go under `updeacon/<name>-<suffix>/` in the bucket. Other flags: `--days
 
 Anyone with a magic link can upload to its target bucket prefix until either the request itself or the credentials associated with it expire or are revoked.
 
-## sssender
-
-Updeacon is built on [sssender](https://github.com/bede/sssender), which uploads any files to S3-compatible storage unmodified ([bede.im/sssender](https://bede.im/sssender/)). sssender replaces seq2bucket. Each app keeps its uploads under its own directory in the bucket (`updeacon/`, `sssender/`), so they never clash. sssender is vendored into [`sssender/`](sssender/).
-
 ## Bucket CORS
 
-This is an important prerequisite for using Updeacon and the most common cause of upload failures. The bucket must be configured to allow `PUT`/`POST` from the page's origin and expose `ETag`. Apply [`cors.json`](sssender/cors.json) with `sh set-cors.sh` (set `AWS_ENDPOINT_URL=https://s3.climb.ac.uk` for CLIMB).
+This is an important prerequisite for using Updeacon and a common cause of upload failures. The bucket must be configured to allow `PUT`/`POST` from the page's origin and expose `ETag`. Apply [`cors.json`](sssender/cors.json) with `scripts/set-cors.sh`. For CLIMB S3 (set `AWS_ENDPOINT_URL=https://s3.climb.ac.uk`).
 
 ## Development
 
 ```sh
-python3 -m http.server 8000                                   # then open / or /sapiometer/
-scripts/mint-magic-link.sh smoke --page http://localhost:8000
+python3 -m http.server 8000
+scripts/mint-magic-link.sh local --page http://localhost:8000
 node --test "tests/*.test.mjs"
 ```
-
-`scripts/deploy.sh` copies the apps into the `bede.github.io` site and pushes. `scripts/sync-wasm.sh` updates the Deacon bundle in `pkg/` from `../deacon`. `scripts/sync-sssender.sh` vendors sssender from `../sssender`. The release version is in [`version.js`](version.js).

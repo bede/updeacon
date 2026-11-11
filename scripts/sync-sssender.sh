@@ -14,7 +14,7 @@ REF="${1:-}"
 
 [[ -d "$SRC_REPO/core" ]] || { echo "sssender not found at $SRC_REPO (set SSSENDER_REPO)" >&2; exit 1; }
 
-# Library only. sssender's own page stays upstream
+# Library only, not sssender's page
 PARTS=(core ui vendor scripts/mint-magic-link.py scripts/check-upload-link.py cors.json)
 
 tmp="$(mktemp -d)"

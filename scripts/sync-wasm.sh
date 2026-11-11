@@ -2,9 +2,10 @@
 # Rebuild the Deacon WASM bundle in ../deacon and sync it into pkg/ (--no-build to skip the rebuild).
 set -euo pipefail
 
-SRC_REPO="${DEACON_REPO:-/Users/bede/Research/git/deacon}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SRC_REPO="${DEACON_REPO:-$ROOT/../deacon}"
 SRC_PKG="$SRC_REPO/deacon-wasm/pkg"
-DEST_PKG="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/pkg"
+DEST_PKG="$ROOT/pkg"
 
 build=1
 [[ "${1:-}" == "--no-build" ]] && build=0
@@ -19,7 +20,6 @@ if [[ "$build" == 1 ]]; then
   "$SRC_REPO/scripts/build-wasm.sh"
 fi
 
-# Files updeacon consumes from the wasm-pack bundle.
 FILES=(
   deacon_wasm.js
   deacon_wasm_bg.wasm
@@ -34,9 +34,8 @@ for f in "${FILES[@]}"; do
   echo "  synced $f"
 done
 
-# Fresh cache token, so browsers never serve a stale worker or WASM
-"$(dirname "${BASH_SOURCE[0]}")/stamp-cache-token.sh"
+"$ROOT/scripts/stamp-cache-token.sh"
 
 SRC_HASH="$(git -C "$SRC_REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo "Synced Deacon WASM from $SRC_REPO (deacon @ $SRC_HASH) into $DEST_PKG"
-echo "Review and commit pkg/ if it changed:  git -C \"$(dirname "$DEST_PKG")\" status pkg/"
+echo "Review and commit pkg/ if it changed:  git -C \"$ROOT\" status pkg/"

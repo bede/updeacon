@@ -19,7 +19,7 @@ test("the source module graph uses one cache token, vendored files included", as
     const text = await readFile(resolve(root, path), "utf8");
     tokens.push(...[...text.matchAll(/(?:ASSET_VERSION = "|[?]v=)([0-9]{8}-[0-9]{6})/g)].map((m) => m[1]));
   }
-  assert.ok(tokens.length >= 40, `only ${tokens.length} tokens found`);
+  assert.ok(tokens.length >= files.length, `only ${tokens.length} tokens in ${files.length} files`);
   assert.equal(new Set(tokens).size, 1);
 });
 

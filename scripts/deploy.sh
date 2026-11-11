@@ -1,25 +1,20 @@
 #!/usr/bin/env bash
-# Deploy the apps to the Jekyll blog (bede.github.io) as standalone static apps:
-#   /updeacon-s3/  filter with Deacon, then upload (vendored sssender/ inside)
-#   /sapiometer/   human-content check, no upload
-# No build step. pkg/ (Deacon WASM) and sssender/ are prebuilt.
+# Deploy both apps to the bede.github.io Jekyll site:
+#   /updeacon-s3/  filter, then upload
+#   /sapiometer/   human-content check
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PAGES_ROOT="${PAGES_ROOT:-/Users/bede/Research/git/bede.github.io}"
 
 SOURCE_HASH="$(git -C "$SRC" rev-parse --short HEAD)"
-# We copy the working tree, not HEAD, so don't label uncommitted code with a clean hash
+# The working tree is copied, so mark it dirty, timestamped as dirty deploys can differ at one HEAD
 if [[ -n "$(git -C "$SRC" status --porcelain)" ]]; then
-  # Repeated dirty deployments may contain different bytes at the same HEAD.
   SOURCE_HASH="$SOURCE_HASH-dirty-$(date -u +%Y%m%d%H%M%S)"
 fi
 
-# Each app's file set (paths relative to its deployed dir) is the single source of
-# truth: files copied, stamped, staged and pruned all derive from it, so a rename in
-# SRC can't leave an orphaned copy behind in the deployed app.
+# Each app's file set drives copy, stamp, stage and prune
 
-# The vendored sssender, as sync-sssender.sh left it
 SSSENDER_LIB=()
 while IFS= read -r f; do SSSENDER_LIB+=("sssender/$f"); done < <(
   cd "$SRC/sssender" && find core ui vendor -type f ! -name .DS_Store | sort
@@ -29,34 +24,37 @@ for f in "${SSSENDER_LIB[@]}"; do
   case "$f" in sssender/ui/fonts.css|sssender/ui/fonts/*) SSSENDER_FONTS+=("$f") ;; esac
 done
 
+# Shared by both apps
+DEACON_FILES=(
+  deacon.js
+  index-cache.js
+  pairing.js
+  protocol.js
+  version.js
+  worker.js
+  pkg/deacon_wasm.js
+  pkg/deacon_wasm_bg.wasm
+)
+
 UPDEACON_FILES=(
   index.html
   mint.html
   app.js
-  deacon.js
-  pairing.js
-  version.js
-  worker.js
-  protocol.js
-  pkg/deacon_wasm.js
-  pkg/deacon_wasm_bg.wasm
+  "${DEACON_FILES[@]}"
   "${SSSENDER_LIB[@]}"
 )
 
-# sapiometer/index.html refers to ../sapiometer.js and ../sssender/. Deployed, both sit beside it
+# sapiometer/index.html refers to ../, but deploys beside its files
 SAPIO_FILES=(
   index.html
   sapiometer.js
-  worker.js
-  protocol.js
-  pairing.js
+  "${DEACON_FILES[@]}"
+  sssender/core/format.js
   sssender/core/select.js
   "${SSSENDER_FONTS[@]}"
-  pkg/deacon_wasm.js
-  pkg/deacon_wasm_bg.wasm
 )
 
-# copy_app <src dir> <dest dir> <files…>: each file keeps its path relative to both
+# copy_app <src> <dest> <files…>
 copy_app() {
   local from="$1" to="$2"; shift 2
   for f in "$@"; do
@@ -65,9 +63,7 @@ copy_app() {
   done
 }
 
-# One deployment is one coherent module graph. Stamp every cache token with the
-# revision so a new entry point can never import an older dependency, and stamp
-# the build commit the pages log and record.
+# Stamp cache tokens and BUILD_COMMIT with the source hash
 stamp() {
   local dir="$1"; shift
   for f in "$@"; do
@@ -91,8 +87,7 @@ echo "Deployed to $PAGES_ROOT/sapiometer"
 cd "$PAGES_ROOT"
 branch="$(git rev-parse --abbrev-ref HEAD)"
 
-# Prune any tracked file under a deployed app dir that is no longer in its deploy
-# set (e.g. left behind by a rename), then stage the current set.
+# Remove tracked files no longer in the set, then stage it
 prune_and_stage() {
   local dir="$1"; shift
   local set=("$@")

@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Stamp one cache token into every source file, so browsers never mix module
-# versions or run a stale worker against new WASM. The one place that decides
-# which files, at any depth as sssender/ is nested.
+# Stamp one cache token into every source file, so browsers never mix module versions
 #
 #   scripts/stamp-cache-token.sh            # fresh timestamp token
 #   scripts/stamp-cache-token.sh <token>    # given token (YYYYMMDD-HHMMSS)

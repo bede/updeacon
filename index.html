@@ -7,7 +7,6 @@
 <link rel="stylesheet" href="./sssender/ui/fonts.css?v=20261109-150125">
 <link rel="stylesheet" href="./sssender/ui/style.css?v=20261109-150125">
 <style>
-  /* Deacon index panel (updeacon only) */
   .index-status { border: 1px solid #ddd; background: #fff; padding: 1rem; margin-bottom: 1rem; transition: all 0.2s; text-align: center; }
   .index-status input { display: none; }
   /* Matches .link-banner .link-dest */
@@ -16,7 +15,7 @@
   .index-status progress { width: 100%; margin-top: 0.5rem; }
   .index-status .idx-info { font-size: 0.8rem; color: #888; margin-top: 0.3rem; }
   .index-status .idx-info:empty { display: none; }
-  /* Animated trailing dots for "Loading…" states. Fixed width so the label stays put. */
+  /* Fixed-width animated dots for loading states */
   .idx-info.loading-dots::after { content: ""; display: inline-block; width: 1.2em; text-align: left; animation: loading-dots 1.2s steps(4, end) infinite; }
   @keyframes loading-dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75%, 100% { content: "..."; } }
   .index-status .index-actions { display: flex; gap: 0.8rem; justify-content: center; }
@@ -36,13 +35,13 @@
 <div class="section-head unnumbered">Usage</div>
 <div class="usage">
   <ol id="usage-link" hidden>
-    <li>Press 'Download index' or wait for the cached <a href="https://objectstorage.uk-london-1.oraclecloud.com/n/lrbvkel2wjot/b/human-genome-bucket/o/deacon/3/panhuman-1.k31w25c9b16.pidx">panhuman-1 index</a> to load.</li>
+    <li>Press 'Download index' or wait for the cached <a class="index-link">panhuman-1 index</a> to load.</li>
     <li>Drag &amp; drop fasta/fastq files you wish to upload or a directory containing them. Illumina R1/R2 files are paired automatically.</li>
     <li>Choose an upload name and press 'Filter &amp; upload' or 'Filter only'.</li>
   </ol>
   <ol id="usage-creds">
     <li>Enter S3-compatible object storage credentials.</li>
-    <li>Press 'Download index', else drag & drop a local copy of <a href="https://objectstorage.uk-london-1.oraclecloud.com/n/lrbvkel2wjot/b/human-genome-bucket/o/deacon/3/panhuman-1.k31w25c9b16.pidx">panhuman-1</a>.</li>
+    <li>Press 'Download index', else drag & drop a local copy of <a class="index-link">panhuman-1</a>.</li>
     <li>Drag &amp; drop fasta/fastq files you wish to upload, or a directory containing them. Illumina R1/R2 files are paired automatically.</li>
     <li>Choose an upload name and then press 'Filter &amp; upload' or 'Filter only'.</li>
   </ol>

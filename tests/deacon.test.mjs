@@ -47,9 +47,7 @@ function setup({ reloadIndex = async () => new ArrayBuffer(4) } = {}) {
     setTimerFn: (fn) => (timers.set(++seq, fn), seq),
     clearTimerFn: (id) => timers.delete(id),
   });
-  const boot = (w) => {
-    w.reply({ type: MSG.READY });
-  };
+  const boot = (w) => w.reply({ type: MSG.READY });
   boot(workers[0]);
   engine.loadIndex(new ArrayBuffer(4));
   workers[0].reply({ type: MSG.INDEX_LOADED, info: "k=31, w=15" });
@@ -86,7 +84,7 @@ test("a crashed worker fails its file for a retry, then a fresh one reloads the 
   await flush();
   assert.deepEqual(workers[1].sent, [MSG.INIT, MSG.LOAD_INDEX, MSG.FILTER, MSG.PULL]);
   assert.deepEqual(loaded, ["k=31, w=15"]); // a restart doesn't announce the index again
-  workers[1].reply({ type: MSG.OUTPUT_CHUNK_BATCH, chunks: [new Uint8Array([7]).buffer], done: true, stats: {} });
+  workers[1].reply({ type: MSG.OUTPUT_CHUNK_BATCH, chunks: [[new Uint8Array([7]).buffer]], done: true, stats: {} });
   assert.deepEqual([...(await next).value], [7]);
 });
 
@@ -107,11 +105,11 @@ test("an idle worker waiting on its consumer is never a stall", async () => {
   const reader = engine.filterGroup(single)[0].stream.getReader();
   const read = reader.read();
   await flush();
-  workers[0].reply({ type: MSG.OUTPUT_CHUNK_BATCH, chunks: [new Uint8Array([1]).buffer], done: false });
+  workers[0].reply({ type: MSG.OUTPUT_CHUNK_BATCH, chunks: [[new Uint8Array([1]).buffer]], done: false });
   await read;
   await flush();
   // The stream pulls one batch ahead
-  workers[0].reply({ type: MSG.OUTPUT_CHUNK_BATCH, chunks: [new Uint8Array([2]).buffer], done: false });
+  workers[0].reply({ type: MSG.OUTPUT_CHUNK_BATCH, chunks: [[new Uint8Array([2]).buffer]], done: false });
   await flush();
   // The consumer (e.g. an upload waiting for the connection) asks for no more
   assert.equal(workers[0].sent.filter((t) => t === MSG.PULL).length, 2);
