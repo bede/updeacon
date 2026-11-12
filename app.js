@@ -1,6 +1,6 @@
 // updeacon-s3: filter fa/fq with Deacon in the browser, then upload via sssender
-import { DEACON_VERSION } from "./protocol.js?v=20261109-150125";
-import { createDeaconEngine, deaconTransform, gzName, logFilterParams } from "./deacon.js?v=20261109-150125";
+import { DEACON_VERSION } from "./protocol.js?v=20261112-161156";
+import { createDeaconEngine, deaconTransform, gzName, logFilterParams } from "./deacon.js?v=20261112-161156";
 import {
   FILTER_INDEX_URL as INDEX_URL,
   clearCachedIndex,
@@ -8,13 +8,13 @@ import {
   getCachedIndex,
   pruneStaleIndexes,
   putCachedIndex,
-} from "./index-cache.js?v=20261109-150125";
-import { SEQ_RE, describeGroups, isPaired, pairSequenceFiles } from "./pairing.js?v=20261109-150125";
-import { VERSION, BUILD_COMMIT } from "./version.js?v=20261109-150125";
-import { purgeStaleSpools } from "./sssender/core/spool.js?v=20261109-150125";
-import { findOversizeFiles } from "./sssender/core/pipeline.js?v=20261109-150125";
-import { makeRunView, renderFileList } from "./sssender/ui/run-view.js?v=20261109-150125";
-import { bindCancel, bindSelection, readMagicLink, showMode, uploadSelection } from "./sssender/ui/upload-page.js?v=20261109-150125";
+} from "./index-cache.js?v=20261112-161156";
+import { SEQ_RE, describeGroups, isPaired, pairSequenceFiles } from "./pairing.js?v=20261112-161156";
+import { VERSION, BUILD_COMMIT } from "./version.js?v=20261112-161156";
+import { purgeStaleSpools } from "./sssender/core/spool.js?v=20261112-161156";
+import { findOversizeFiles } from "./sssender/core/pipeline.js?v=20261112-161156";
+import { makeRunView, renderFileList } from "./sssender/ui/run-view.js?v=20261112-161156";
+import { bindCancel, bindSelection, readMagicLink, showMode, uploadSelection } from "./sssender/ui/upload-page.js?v=20261112-161156";
 import {
   bindCredentialForm,
   bindUploadName,
@@ -25,7 +25,7 @@ import {
   plural,
   setButtonDisabled,
   summariseSelection,
-} from "./sssender/ui/ui.js?v=20261109-150125";
+} from "./sssender/ui/ui.js?v=20261112-161156";
 
 const APP = "updeacon";
 const ROOT = "updeacon/"; // matches mint.html's data-root

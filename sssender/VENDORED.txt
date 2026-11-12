@@ -2,4 +2,4 @@ Vendored copy of sssender. Do not edit here: change sssender, then rerun
 scripts/sync-sssender.sh.
 
 version  0.6.0
-commit   5ebe50b
+commit   add5a5d

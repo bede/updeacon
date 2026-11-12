@@ -1,9 +1,9 @@
-import { MSG, FILTER_DEFAULTS } from "./protocol.js?v=20261109-150125";
+import { MSG, FILTER_DEFAULTS } from "./protocol.js?v=20261112-161156";
 
 // Deacon filtering off the main thread. One output batch per PULL bounds memory
 let wasm = null;
 let index = null;
-const ASSET_VERSION = "20261109-150125";
+const ASSET_VERSION = "20261112-161156";
 const OUTPUT_BATCH_BYTES = 4 * 1024 * 1024;
 const PROGRESS_MS = 150;
 

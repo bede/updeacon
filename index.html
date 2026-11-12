@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>updeacon-s3</title>
-<link rel="stylesheet" href="./sssender/ui/fonts.css?v=20261109-150125">
-<link rel="stylesheet" href="./sssender/ui/style.css?v=20261109-150125">
+<link rel="stylesheet" href="./sssender/ui/fonts.css?v=20261112-161156">
+<link rel="stylesheet" href="./sssender/ui/style.css?v=20261112-161156">
 <style>
   .index-status { border: 1px solid #ddd; background: #fff; padding: 1rem; margin-bottom: 1rem; transition: all 0.2s; text-align: center; }
   .index-status input { display: none; }
@@ -30,8 +30,7 @@
 </head>
 <body>
 <h1>updeacon-s3</h1>
-<p class="subtitle">Securely filter and upload DNA sequences in fasta/fastq format directly to S3 object storage.
-  Runs <a href="https://github.com/bede/deacon">Deacon</a> in the browser to deplete human sequences prior to upload. Files are uploaded to a timestamped path prefix. Nested directory structures are preserved.</p>
+<p class="subtitle">Drag &amp; drop host depletion and upload for DNA sequences in FASTA/FASTQ format. Runs <a href="https://github.com/bede/deacon">Deacon</a> locally to remove human sequences before uploading remaining sequences to an S3-compatible storage bucket.</p>
 <div class="section-head unnumbered">Usage</div>
 <div class="usage">
   <ol id="usage-link" hidden>
@@ -120,8 +119,22 @@
 
 <div id="status"></div>
 
+<dialog id="done-dialog" aria-labelledby="done-title">
+  <form method="dialog">
+    <h2 id="done-title"></h2>
+    <p><span id="done-count"></span> uploaded to <span id="done-dest" class="mono"></span></p>
+    <div id="done-skipped" hidden>
+      <p><span id="done-skipped-count"></span> skipped, and listed in <span class="mono">_FAILED.txt</span>:</p>
+      <ul class="skipped" id="done-skipped-list"></ul>
+    </div>
+    <div class="actions">
+      <button value="ok" autofocus>OK</button>
+    </div>
+  </form>
+</dialog>
+
 <p class="info footer-links"><a href="#" id="purge-index">clear index cache</a><span id="mint-entry"> · <a href="./mint.html">mint magic link</a></span></p>
 
-<script type="module" src="./app.js?v=20261109-150125"></script>
+<script type="module" src="./app.js?v=20261112-161156"></script>
 </body>
 </html>

@@ -49,7 +49,8 @@ test("Deacon runs one group at a time, gzips names and summarises each pair", as
     async preflight() {},
     async uploadGroup(item, outputs) {
       assert.equal(outputs.length, item.files.length);
-      await new Promise((r) => setImmediate(r));
+      // Uploaders consume their streams before reporting success
+      await Promise.all(outputs.map((o) => new Response(o.stream).arrayBuffer()));
       active--;
       uploaded.push(...item.keys);
       return item.keys;

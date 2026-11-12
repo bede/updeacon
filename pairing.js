@@ -1,6 +1,6 @@
 // Sequence files grouped for sssender: R1/R2 mates as one two-file group, others alone
-import { plural } from "./sssender/core/format.js?v=20261109-150125";
-import { relativePath } from "./sssender/core/select.js?v=20261109-150125";
+import { plural } from "./sssender/core/format.js?v=20261112-161156";
+import { relativePath } from "./sssender/core/select.js?v=20261112-161156";
 
 export const SEQ_RE = /\.(fastq|fq|fasta|fa)(\.gz)?$/i;
 

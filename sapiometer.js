@@ -1,8 +1,8 @@
 // sapiometer: in-browser human-content check
-import { CHECK_DEFAULTS } from "./protocol.js?v=20261109-150125";
-import { createDeaconEngine } from "./deacon.js?v=20261109-150125";
-import { CHECK_INDEX_URL, downloadIndex, getCachedIndex, putCachedIndex } from "./index-cache.js?v=20261109-150125";
-import { SEQ_RE, pairSequenceFiles } from "./pairing.js?v=20261109-150125";
+import { CHECK_DEFAULTS } from "./protocol.js?v=20261112-161156";
+import { createDeaconEngine } from "./deacon.js?v=20261112-161156";
+import { CHECK_INDEX_URL, downloadIndex, getCachedIndex, putCachedIndex } from "./index-cache.js?v=20261112-161156";
+import { SEQ_RE, pairSequenceFiles } from "./pairing.js?v=20261112-161156";
 
 const WARN_THRESHOLD = 0.01; // >1% human is amber
 const HIGH_THRESHOLD = 0.05; // >5% human is red
